@@ -1,0 +1,7 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    platform: linux/amd64
+  kafka:
+    platform: linux/amd64
