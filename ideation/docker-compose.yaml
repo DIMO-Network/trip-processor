@@ -1,0 +1,35 @@
+version: "3.9"
+services:
+
+  zookeeper:
+    image: 'bitnami/zookeeper:latest'
+    ports:
+      - '2182:2181'
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - kafka-bridge-network
+
+  kafka:
+    image: 'bitnami/kafka:latest'
+    ports:
+      - '9093:9093'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9093
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+    networks:
+      - kafka-bridge-network
+  
+
+networks:
+  kafka-bridge-network:
+    driver: bridge
+
+# kafka-topics.sh --create --topic NewTopic --bootstrap-server localhost:9093
+# kafka-console-producer.sh --topic test-topic --bootstrap-server localhost:9093
+# kafka-console-consumer.sh --topic test-topic --from-beginning --bootstrap-server localhost:9093
