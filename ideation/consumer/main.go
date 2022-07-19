@@ -180,7 +180,7 @@ func main() {
 	var wg sync.WaitGroup
 	config := sarama.NewConfig()
 	config.Consumer.Return.Errors = false
-	config.Version = sarama.V0_10_2_0
+	config.Version = sarama.V2_8_1_0
 	client, err := sarama.NewClient([]string{"localhost:9093"}, config)
 	defer client.Close()
 	if err != nil {
