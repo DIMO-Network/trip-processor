@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Shopify/sarama"
@@ -12,7 +13,7 @@ import (
 )
 
 const topic string = "test-topic"
-const partitions int32 = 9
+const partitions int32 = 1
 
 var brokerURLs = []string{"localhost:9093"}
 
@@ -60,14 +61,13 @@ func main() {
 	defer jsonFile.Close()
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 
-	numResponses := gjson.Get(string(byteValue), "rawResponse.hits.hits.#").Int()
+	numResponses := gjson.Get(string(byteValue), "hits.hits.#").Int()
 
 	for i := 0; int64(i) < numResponses; i++ {
-		base := fmt.Sprintf("rawResponse.hits.hits.%d.fields", i)
-		speed := gjson.Get(string(byteValue), base+".data\\.payload\\.data\\.speed.0").Int()
-		timestamp := gjson.Get(string(byteValue), base+".data\\.payload\\.time.0").Time()
-
-		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(fmt.Sprintf("VehicleID: %s", "uniqueTestID")), Value: sarama.StringEncoder(fmt.Sprintf(`{"Speed": %d, "Timestamp": %t}`, speed, timestamp))}
+		base := fmt.Sprintf("hits.hits.%d._source.data", i)
+		speed := gjson.Get(string(byteValue), base+".speed").Int()
+		timestamp := strings.Replace(gjson.Get(string(byteValue), base+".timestamp").Str, "Z", "", 1)
+		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(fmt.Sprintf("VehicleID: %s", "uniqueTestID")), Value: sarama.StringEncoder(fmt.Sprintf(`{"Speed": %d, "Timestamp": %s}`, speed, timestamp))}
 		// also returns partition and offset.. do we need this for anything?
 		_, _, err := producer.SendMessage(message)
 		if err != nil {
@@ -76,7 +76,7 @@ func main() {
 		} else {
 			successes++
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	log.Printf("Successfully produced: %d; errors: %d\n", successes, errors)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,16 +27,19 @@ func (consumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
 }
 
 type userTrip struct {
+	UserID         string
 	Start          time.Time
-	Latest         time.Time
+	LatestTime     time.Time
+	LastestSpeed   int64
 	AutoExpireTrip *time.Timer
+	TripComplete   bool
+	VehicleStopped time.Time
 }
 
-func (u *userTrip) AutoExpire(d time.Duration) {
+func (u *userTrip) AutoExpire(d time.Duration, tripMap map[string]userTrip) {
 	u.AutoExpireTrip = time.AfterFunc(d, func() {
 		fmt.Printf("A completed trip has been logged.\n")
-		// TO DO
-		// remove key from map
+		delete(tripMap, u.UserID)
 	})
 }
 
@@ -48,32 +52,107 @@ func (u *userTrip) StopAutoExpire() bool {
 }
 
 func (h consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	// how/ when will this be read/ written to? mutex lock?
 	uTrips := make(map[string]userTrip)
 	for msg := range claim.Messages() {
 		// fmt.Printf("%s Message topic:%q partition:%d offset:%d  value:%s key:%q\n", h.name, msg.Topic, msg.Partition, msg.Offset, string(msg.Value), msg.Key)
-		processTrips(uTrips, msg)
+		processTripsWithoutTimer(uTrips, msg)
 		sess.MarkMessage(msg, "")
 	}
 
 	return nil
 }
 
-func processTrips(ongoingTrips map[string]userTrip, msg *sarama.ConsumerMessage) {
+func processTripsWithTimer(ongoingTrips map[string]userTrip, msg *sarama.ConsumerMessage) {
 
-	if val, ok := ongoingTrips[string(msg.Key)]; ok {
+	currentSpeed := gjson.Get(string(msg.Value), "Speed").Int()
 
-		if gjson.Get(string(msg.Value), "Speed").Int() > int64(0) {
-			val.RefreshAutoExpire(time.Second * 10)
+	if currentSpeed > int64(0) {
+		if val, ok := ongoingTrips[string(msg.Key)]; ok {
+
+			if currentSpeed > int64(0) {
+				val.RefreshAutoExpire(time.Second * 10)
+				return
+			} else {
+				// sleep is just in here for testing
+				time.Sleep(5 * time.Second)
+			}
 		} else {
-			// just in here for testing
-			time.Sleep(5 * time.Second)
+			newTrip := userTrip{Start: time.Now(), LatestTime: time.Now(), UserID: string(msg.Key)}
+			newTrip.AutoExpire(time.Second*10, ongoingTrips)
+			ongoingTrips[string(msg.Key)] = newTrip
 		}
-	} else {
-		newTrip := userTrip{Start: time.Now(), Latest: time.Now()}
-		newTrip.AutoExpire(time.Second * 10)
-		ongoingTrips[string(msg.Key)] = newTrip
+	}
+}
+
+func processTripsWithoutTimer(ongoingTrips map[string]userTrip, msg *sarama.ConsumerMessage) {
+
+	speedVal := gjson.Get(string(msg.Value), "Speed").Raw
+	timeVal := gjson.Get(string(msg.Value), "Timestamp").Raw
+	currentTime, err := time.Parse("2006-01-02T15:04:05", timeVal)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	currentSpeed, err := strconv.Atoi(speedVal)
+	if err != nil {
+		log.Fatal(err)
+		return
 	}
 
+	if val, ok := ongoingTrips[string(msg.Key)]; ok {
+		if currentTime.Sub(val.LatestTime).Minutes() <= 15 && currentTime.Sub(val.LatestTime).Minutes() > 0 {
+
+			if currentSpeed == 0 {
+				if val.VehicleStopped.IsZero() {
+					val.VehicleStopped = currentTime
+					val.LatestTime = currentTime
+					fmt.Println("\t\tvehicle stopped", currentSpeed, currentTime)
+					return
+				} else {
+					if currentTime.Sub(val.VehicleStopped).Minutes() <= 15 && currentTime.Sub(val.VehicleStopped).Minutes() > 0 {
+						val.TripComplete = true
+						delete(ongoingTrips, val.UserID)
+						fmt.Println("Trip Completed, vehicle stopped for more than 15 minutes\t", currentSpeed, currentTime)
+						return
+					}
+					val.LatestTime = currentTime
+					fmt.Println("\t", currentSpeed, currentTime)
+					return
+				}
+			} else {
+				if !val.VehicleStopped.IsZero() {
+					val.VehicleStopped = time.Time{}
+				}
+				val.LatestTime = currentTime
+				fmt.Println("\t", currentSpeed, currentTime)
+				return
+			}
+		} else {
+
+			if currentTime.Sub(val.LatestTime).Minutes() < 0 {
+				fmt.Println("\t\tTime delta < 0", currentSpeed, currentTime)
+				val.TripComplete = true
+				delete(ongoingTrips, val.UserID)
+				fmt.Println("Trip Completed, most recent timestamp is earlier than latest timestamp recorded\t", currentSpeed, currentTime)
+				return
+			}
+
+			val.TripComplete = true
+			delete(ongoingTrips, val.UserID)
+			fmt.Println("Trip Completed, timestamp greater than 15 minutes after latest\t", currentSpeed, currentTime)
+		}
+
+	} else {
+		if currentSpeed != 0 {
+			fmt.Println("\nStarting new trip\t", currentSpeed, currentTime)
+			newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key)}
+			ongoingTrips[string(msg.Key)] = newTrip
+			return
+		}
+	}
+
+	fmt.Println("\nMovement not detected\t", currentSpeed, currentTime)
 }
 
 func handleErrors(group *sarama.ConsumerGroup, wg *sync.WaitGroup) {
@@ -111,57 +190,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	group2, err := sarama.NewConsumerGroupFromClient("c2", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group3, err := sarama.NewConsumerGroupFromClient("c3", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group4, err := sarama.NewConsumerGroupFromClient("c4", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group5, err := sarama.NewConsumerGroupFromClient("c5", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group6, err := sarama.NewConsumerGroupFromClient("c6", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group7, err := sarama.NewConsumerGroupFromClient("c7", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group8, err := sarama.NewConsumerGroupFromClient("c8", client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	group9, err := sarama.NewConsumerGroupFromClient("c9", client)
-	if err != nil {
-		log.Fatal(err)
-	}
 	defer group1.Close()
-	defer group2.Close()
-	defer group3.Close()
-	defer group4.Close()
-	defer group5.Close()
-	defer group6.Close()
-	defer group7.Close()
-	defer group8.Close()
-	defer group9.Close()
 	wg.Add(9)
 	go consume(&group1, &wg, "c1")
-	go consume(&group2, &wg, "c2")
-	go consume(&group3, &wg, "c3")
-	go consume(&group4, &wg, "c4")
-	go consume(&group5, &wg, "c5")
-	go consume(&group6, &wg, "c6")
-	go consume(&group7, &wg, "c7")
-	go consume(&group8, &wg, "c8")
-	go consume(&group9, &wg, "c9")
 	wg.Wait()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
