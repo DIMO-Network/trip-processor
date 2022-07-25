@@ -6,13 +6,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/tidwall/gjson"
 )
+
+var topic string = "new-topic"
+var partitions int32 = 9
 
 type consumerGroupHandler struct {
 	name string
@@ -26,36 +28,9 @@ func (consumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-type userTrip struct {
-	UserID         string
-	Start          time.Time
-	LatestTime     time.Time
-	LastestSpeed   int64
-	AutoExpireTrip *time.Timer
-	TripComplete   bool
-	VehicleStopped time.Time
-}
-
-func (u *userTrip) AutoExpire(d time.Duration, tripMap map[string]userTrip) {
-	u.AutoExpireTrip = time.AfterFunc(d, func() {
-		fmt.Printf("A completed trip has been logged.\n")
-		delete(tripMap, u.UserID)
-	})
-}
-
-func (u *userTrip) RefreshAutoExpire(d time.Duration) {
-	u.AutoExpireTrip.Reset(d)
-}
-
-func (u *userTrip) StopAutoExpire() bool {
-	return u.AutoExpireTrip.Stop()
-}
-
 func (h consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	// how/ when will this be read/ written to? mutex lock?
-	uTrips := make(map[string]userTrip)
+	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
 	for msg := range claim.Messages() {
-		// fmt.Printf("%s Message topic:%q partition:%d offset:%d  value:%s key:%q\n", h.name, msg.Topic, msg.Partition, msg.Offset, string(msg.Value), msg.Key)
 		processTripsWithoutTimer(uTrips, msg)
 		sess.MarkMessage(msg, "")
 	}
@@ -63,100 +38,151 @@ func (h consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, cla
 	return nil
 }
 
-func processTripsWithTimer(ongoingTrips map[string]userTrip, msg *sarama.ConsumerMessage) {
-
-	currentSpeed := gjson.Get(string(msg.Value), "Speed").Int()
-
-	if currentSpeed > int64(0) {
-		if val, ok := ongoingTrips[string(msg.Key)]; ok {
-
-			if currentSpeed > int64(0) {
-				val.RefreshAutoExpire(time.Second * 10)
-				return
-			} else {
-				// sleep is just in here for testing
-				time.Sleep(5 * time.Second)
-			}
-		} else {
-			newTrip := userTrip{Start: time.Now(), LatestTime: time.Now(), UserID: string(msg.Key)}
-			newTrip.AutoExpire(time.Second*10, ongoingTrips)
-			ongoingTrips[string(msg.Key)] = newTrip
-		}
-	}
+type userTrip struct {
+	UserID         string
+	Start          time.Time
+	LatestTime     time.Time
+	LatestSpeed    float64
+	AutoExpireTrip *time.Timer
+	Route          []coordinates
+	mu             *sync.Mutex
 }
 
-func processTripsWithoutTimer(ongoingTrips map[string]userTrip, msg *sarama.ConsumerMessage) {
+type coordinates struct {
+	Latitude  float64
+	Longitude float64
+}
 
-	speedVal := gjson.Get(string(msg.Value), "Speed").Raw
+type ongoingTrips struct {
+	data map[string]*userTrip
+	mu   *sync.Mutex
+}
+
+func (t ongoingTrips) Get(s string) (*userTrip, bool) {
+
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+
+	val, ok := t.data[s]
+	return val, ok
+}
+
+func (t ongoingTrips) Put(u *userTrip) {
+
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	t.data[u.UserID] = u
+}
+
+func (t ongoingTrips) Delete(s string) {
+
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	delete(t.data, s)
+
+}
+
+func (t ongoingTrips) AutoExpire(d time.Duration, s string) error {
+	user, b := t.Get(s)
+	if b != true {
+		return fmt.Errorf("unable to get user trip for auto expire")
+	}
+	user.AutoExpireTrip = time.AfterFunc(d, func() {
+		fmt.Printf("A completed trip has been logged.\n")
+		t.Delete(s)
+	})
+	return nil
+}
+
+func (t ongoingTrips) RefreshAutoExpire(d time.Duration, s string) error {
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	user, b := t.Get(s)
+	if b != true {
+		return fmt.Errorf("unable to get user trip for refresh auto expire")
+	}
+	user.AutoExpireTrip.Reset(d)
+	return nil
+}
+
+func (t ongoingTrips) StopAutoExpire(s string) error {
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	user, b := t.Get(s)
+	if b != true {
+		return fmt.Errorf("unable to get user trip for stop auto expire")
+	}
+	user.AutoExpireTrip.Stop()
+	return nil
+}
+
+func (t ongoingTrips) RefreshLatestTime(tm time.Time, s string) error {
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	user, b := t.Get(s)
+	if b != true {
+		return fmt.Errorf("unable to get user trip for refresh latest time")
+	}
+	user.LatestTime = tm
+	return nil
+}
+
+func (t ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
+	user, b := t.Get(s)
+	if b != true {
+		return fmt.Errorf("unable to get user trip for add coords to route")
+	}
+	user.Route = append(user.Route, coords)
+	return nil
+}
+
+// k tables!!!!
+
+func processTripsWithoutTimer(trps ongoingTrips, msg *sarama.ConsumerMessage) {
+
 	timeVal := gjson.Get(string(msg.Value), "Timestamp").Raw
+	currentSpeed := gjson.Get(string(msg.Value), "Speed").Float()
+	lat := gjson.Get(string(msg.Value), "Latitude").Float()
+	lon := gjson.Get(string(msg.Value), "Longitude").Float()
+
 	currentTime, err := time.Parse("2006-01-02T15:04:05", timeVal)
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
-	currentSpeed, err := strconv.Atoi(speedVal)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
 
-	if val, ok := ongoingTrips[string(msg.Key)]; ok {
-		if currentTime.Sub(val.LatestTime).Minutes() <= 15 && currentTime.Sub(val.LatestTime).Minutes() > 0 {
+	coords := coordinates{Latitude: lat, Longitude: lon}
 
-			if currentSpeed == 0 {
-				if val.VehicleStopped.IsZero() {
-					val.VehicleStopped = currentTime
-					val.LatestTime = currentTime
-					fmt.Println("\t\tvehicle stopped", currentSpeed, currentTime)
-					return
-				} else {
-					if currentTime.Sub(val.VehicleStopped).Minutes() <= 15 && currentTime.Sub(val.VehicleStopped).Minutes() > 0 {
-						val.TripComplete = true
-						delete(ongoingTrips, val.UserID)
-						fmt.Println("Trip Completed, vehicle stopped for more than 15 minutes\t", currentSpeed, currentTime)
-						return
-					}
-					val.LatestTime = currentTime
-					fmt.Println("\t", currentSpeed, currentTime)
-					return
+	if currentSpeed > 0 {
+		if val, ok := trps.data[string(msg.Key)]; ok {
+			if currentTime.Sub(val.LatestTime).Minutes() < 15 {
+				if currentSpeed > 0.0 {
+					trps.RefreshLatestTime(currentTime, val.UserID)
+					trps.AddCoordToRoute(coords, val.UserID)
 				}
+
 			} else {
-				if !val.VehicleStopped.IsZero() {
-					val.VehicleStopped = time.Time{}
-				}
-				val.LatestTime = currentTime
-				fmt.Println("\t", currentSpeed, currentTime)
-				return
+				fmt.Println("\n\nUser: ", string(msg.Key), "\nTrip Completed: ", val.Route)
+				trps.Delete(val.UserID)
+
+				newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+				trps.Put(&newTrip)
+				trps.AutoExpire(time.Minute*10, newTrip.UserID)
 			}
+
 		} else {
-
-			if currentTime.Sub(val.LatestTime).Minutes() < 0 {
-				fmt.Println("\t\tTime delta < 0", currentSpeed, currentTime)
-				val.TripComplete = true
-				delete(ongoingTrips, val.UserID)
-				fmt.Println("Trip Completed, most recent timestamp is earlier than latest timestamp recorded\t", currentSpeed, currentTime)
-				return
-			}
-
-			val.TripComplete = true
-			delete(ongoingTrips, val.UserID)
-			fmt.Println("Trip Completed, timestamp greater than 15 minutes after latest\t", currentSpeed, currentTime)
+			newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+			trps.Put(&newTrip)
+			trps.AutoExpire(time.Minute*10, newTrip.UserID)
 		}
 
-	} else {
-		if currentSpeed != 0 {
-			fmt.Println("\nStarting new trip\t", currentSpeed, currentTime)
-			newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key)}
-			ongoingTrips[string(msg.Key)] = newTrip
-			return
-		}
 	}
-
-	fmt.Println("\nMovement not detected\t", currentSpeed, currentTime)
 }
 
 func handleErrors(group *sarama.ConsumerGroup, wg *sync.WaitGroup) {
-	wg.Done()
+	defer wg.Done()
 	for err := range (*group).Errors() {
 		fmt.Println("ERROR", err)
 	}
@@ -164,10 +190,10 @@ func handleErrors(group *sarama.ConsumerGroup, wg *sync.WaitGroup) {
 
 func consume(group *sarama.ConsumerGroup, wg *sync.WaitGroup, name string) {
 	fmt.Println(name + "start")
-	wg.Done()
+	defer wg.Done()
 	ctx := context.Background()
 	for {
-		topics := []string{"test-topic"}
+		topics := []string{topic}
 		handler := consumerGroupHandler{name: name}
 		err := (*group).Consume(ctx, topics, handler)
 		if err != nil {
