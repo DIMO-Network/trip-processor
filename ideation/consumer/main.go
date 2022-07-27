@@ -31,7 +31,7 @@ func (consumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
 func (h consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
 	for msg := range claim.Messages() {
-		processTripsWithoutTimer(uTrips, msg)
+		processTripsWithoutTimer(&uTrips, msg)
 		sess.MarkMessage(msg, "")
 	}
 
@@ -55,34 +55,30 @@ type coordinates struct {
 
 type ongoingTrips struct {
 	data map[string]*userTrip
-	mu   *sync.Mutex
+	mu   sync.Mutex
 }
 
-func (t ongoingTrips) Get(s string) (*userTrip, bool) {
-
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
-
+func (t *ongoingTrips) Get(s string) (*userTrip, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	val, ok := t.data[s]
 	return val, ok
 }
 
-func (t ongoingTrips) Put(u *userTrip) {
-
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) Put(u *userTrip) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.data[u.UserID] = u
 }
 
-func (t ongoingTrips) Delete(s string) {
-
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) Delete(s string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	delete(t.data, s)
 
 }
 
-func (t ongoingTrips) AutoExpire(d time.Duration, s string) error {
+func (t *ongoingTrips) AutoExpire(d time.Duration, s string) error {
 	user, b := t.Get(s)
 	if b != true {
 		return fmt.Errorf("unable to get user trip for auto expire")
@@ -94,9 +90,9 @@ func (t ongoingTrips) AutoExpire(d time.Duration, s string) error {
 	return nil
 }
 
-func (t ongoingTrips) RefreshAutoExpire(d time.Duration, s string) error {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) RefreshAutoExpire(d time.Duration, s string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	user, b := t.Get(s)
 	if b != true {
 		return fmt.Errorf("unable to get user trip for refresh auto expire")
@@ -105,9 +101,9 @@ func (t ongoingTrips) RefreshAutoExpire(d time.Duration, s string) error {
 	return nil
 }
 
-func (t ongoingTrips) StopAutoExpire(s string) error {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) StopAutoExpire(s string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	user, b := t.Get(s)
 	if b != true {
 		return fmt.Errorf("unable to get user trip for stop auto expire")
@@ -116,9 +112,7 @@ func (t ongoingTrips) StopAutoExpire(s string) error {
 	return nil
 }
 
-func (t ongoingTrips) RefreshLatestTime(tm time.Time, s string) error {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) RefreshLatestTime(tm time.Time, s string) error {
 	user, b := t.Get(s)
 	if b != true {
 		return fmt.Errorf("unable to get user trip for refresh latest time")
@@ -127,9 +121,7 @@ func (t ongoingTrips) RefreshLatestTime(tm time.Time, s string) error {
 	return nil
 }
 
-func (t ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
+func (t *ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
 	user, b := t.Get(s)
 	if b != true {
 		return fmt.Errorf("unable to get user trip for add coords to route")
@@ -140,7 +132,7 @@ func (t ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
 
 // k tables!!!!
 
-func processTripsWithoutTimer(trps ongoingTrips, msg *sarama.ConsumerMessage) {
+func processTripsWithoutTimer(trps *ongoingTrips, msg *sarama.ConsumerMessage) {
 
 	timeVal := gjson.Get(string(msg.Value), "Timestamp").Raw
 	currentSpeed := gjson.Get(string(msg.Value), "Speed").Float()
