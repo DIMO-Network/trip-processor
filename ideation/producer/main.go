@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/tidwall/gjson"
@@ -20,7 +21,7 @@ func main() {
 	config.Producer.Return.Successes = true
 	config.Producer.Partitioner = sarama.NewHashPartitioner
 
-	admin, err := sarama.NewClusterAdmin([]string{"localhost:9093"}, config)
+	admin, err := sarama.NewClusterAdmin([]string{"localhost:9092"}, config)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func main() {
 		}
 	}
 
-	client, err := sarama.NewClient([]string{"localhost:9093"}, config)
+	client, err := sarama.NewClient([]string{"localhost:9092"}, config)
 	defer client.Close()
 	if err != nil {
 		log.Fatal(err)
@@ -49,7 +50,7 @@ func main() {
 	}
 	var successes, errors int
 
-	jsonFile, err := os.Open("multiVehicles.json")
+	jsonFile, err := os.Open("teslaMulti.json")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -66,7 +67,10 @@ func main() {
 		lat := gjson.Get(string(byteValue), base+".data.latitude").Float()
 		lon := gjson.Get(string(byteValue), base+".data.longitude").Float()
 		timestamp := strings.Replace(gjson.Get(string(byteValue), base+".data.timestamp").Str, "Z", "", 1)
-		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(key), Value: sarama.StringEncoder(fmt.Sprintf(`{"Speed": %f, "Timestamp": %s, "Latitude": %f, "Longitude": %f}`, speed, timestamp, lat, lon))}
+		if timestamp == "" {
+			timestamp = time.Time{}.String()
+		}
+		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(key), Value: sarama.StringEncoder(fmt.Sprintf(`{"Key": "%s", "LatestSpeed": %f, "Start": "%s", "Latitude": %f, "Longitude": %f}`, key, speed, timestamp, lat, lon))}
 		p, o, err := producer.SendMessage(message)
 		fmt.Println(p, o, key)
 		if err != nil {

@@ -1,9 +1,9 @@
-module learn-kafka
-
+module trips-api
 go 1.18
 
 require (
 	github.com/Shopify/sarama v1.34.1
+	github.com/gorilla/mux v1.8.0
 	github.com/lovoo/goka v1.1.7
 	github.com/tidwall/gjson v1.14.1
 )

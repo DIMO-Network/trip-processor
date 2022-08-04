@@ -7,35 +7,30 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Shopify/sarama"
+	"github.com/lovoo/goka"
+	"github.com/lovoo/goka/codec"
 	"github.com/tidwall/gjson"
 )
 
-var topic string = "new-topic"
-var partitions int32 = 9
+var (
+	brokers             = []string{"localhost:9092"}
+	topic   goka.Stream = "new-topic"
+	group   goka.Group  = "mini-group"
 
-type consumerGroupHandler struct {
-	name string
-}
+	tmc *goka.TopicManagerConfig
+)
 
-func (consumerGroupHandler) Setup(_ sarama.ConsumerGroupSession) error {
-	return nil
-}
+func init() {
+	// This sets the default replication to 1. If you have more then one broker
+	// the default configuration can be used.
+	tmc = goka.NewTopicManagerConfig()
+	tmc.Table.Replication = 1
+	tmc.Stream.Replication = 1
 
-func (consumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
-	return nil
-}
-
-func (h consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
-	for msg := range claim.Messages() {
-		processTripsWithoutTimer(&uTrips, msg)
-		sess.MarkMessage(msg, "")
-	}
-
-	return nil
 }
 
 type userTrip struct {
@@ -130,19 +125,23 @@ func (t *ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
 	return nil
 }
 
-// k tables!!!!
-
 func processTripsWithoutTimer(trps *ongoingTrips, msg *sarama.ConsumerMessage) {
 
-	timeVal := gjson.Get(string(msg.Value), "Timestamp").Raw
-	currentSpeed := gjson.Get(string(msg.Value), "Speed").Float()
+	timeVal := gjson.Get(string(msg.Value), "Start").Str
+	currentSpeed := gjson.Get(string(msg.Value), "LatestSpeed").Float()
 	lat := gjson.Get(string(msg.Value), "Latitude").Float()
 	lon := gjson.Get(string(msg.Value), "Longitude").Float()
 
-	currentTime, err := time.Parse("2006-01-02T15:04:05", timeVal)
-	if err != nil {
-		log.Fatal(err)
-		return
+	var currentTime time.Time
+	var err error
+	if timeVal != "" {
+		currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+	} else {
+		currentTime = time.Time{}
 	}
 
 	coords := coordinates{Latitude: lat, Longitude: lon}
@@ -173,48 +172,109 @@ func processTripsWithoutTimer(trps *ongoingTrips, msg *sarama.ConsumerMessage) {
 	}
 }
 
-func handleErrors(group *sarama.ConsumerGroup, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for err := range (*group).Errors() {
-		fmt.Println("ERROR", err)
-	}
-}
+// process messages until ctrl-c is pressed
+func runProcessor(trps *ongoingTrips) {
+	// process callback is invoked for each message delivered from
+	cb := func(trps *ongoingTrips) goka.ProcessCallback {
+		return func(ctx goka.Context, msg interface{}) {
 
-func consume(group *sarama.ConsumerGroup, wg *sync.WaitGroup, name string) {
-	fmt.Println(name + "start")
-	defer wg.Done()
-	ctx := context.Background()
-	for {
-		topics := []string{topic}
-		handler := consumerGroupHandler{name: name}
-		err := (*group).Consume(ctx, topics, handler)
-		if err != nil {
-			log.Fatal(err)
+			timeVal := gjson.Get(msg.(string), "Start").Str
+			currentSpeed := gjson.Get(msg.(string), "LatestSpeed").Float()
+			lat := gjson.Get(msg.(string), "Latitude").Float()
+			lon := gjson.Get(msg.(string), "Longitude").Float()
+
+			var currentTime time.Time
+			var err error
+			if timeVal != "" {
+				currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
+				if err != nil {
+					log.Fatal(err)
+					return
+				}
+			} else {
+				currentTime = time.Time{}
+			}
+
+			coords := coordinates{Latitude: lat, Longitude: lon}
+			if currentSpeed > 0 {
+				if val, ok := trps.data[ctx.Key()]; ok {
+					if currentTime.Sub(val.LatestTime).Minutes() < 15 {
+						if currentSpeed > 0.0 {
+							trps.RefreshLatestTime(currentTime, val.UserID)
+							trps.AddCoordToRoute(coords, val.UserID)
+						}
+
+					} else {
+						fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
+						trps.Delete(val.UserID)
+
+						newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+						trps.Put(&newTrip)
+						trps.AutoExpire(time.Minute*10, newTrip.UserID)
+					}
+
+				} else {
+					fmt.Println("new user")
+					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+					trps.Put(&newTrip)
+					trps.AutoExpire(time.Minute*10, newTrip.UserID)
+				}
+
+			}
 		}
 	}
+
+	// Define a new processor group. The group defines all inputs, outputs, and
+	// serialization formats. The group-table topic is "example-group-table".
+	g := goka.DefineGroup(group,
+		goka.Input(topic, new(codec.String), cb(trps)),
+		goka.Persist(new(codec.Int64)),
+	)
+
+	p, err := goka.NewProcessor(brokers,
+		g,
+		goka.WithTopicManagerBuilder(goka.TopicManagerBuilderWithTopicManagerConfig(tmc)),
+		goka.WithConsumerGroupBuilder(goka.DefaultConsumerGroupBuilder),
+	)
+	if err != nil {
+		log.Fatalf("error creating processor: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err = p.Run(ctx); err != nil {
+			log.Printf("error running processor: %v", err)
+		}
+	}()
+
+	sigs := make(chan os.Signal)
+	go func() {
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	}()
+
+	select {
+	case <-sigs:
+	case <-done:
+	}
+	cancel()
+	<-done
 }
 
 func main() {
-	var wg sync.WaitGroup
-	config := sarama.NewConfig()
-	config.Consumer.Return.Errors = false
-	config.Version = sarama.V2_8_1_0
-	client, err := sarama.NewClient([]string{"localhost:9093"}, config)
-	defer client.Close()
+	config := goka.DefaultConfig()
+	config.Consumer.Offsets.Initial = sarama.OffsetOldest // read all messages starting with oldest
+	goka.ReplaceGlobalConfig(config)
+
+	tm, err := goka.NewTopicManager(brokers, goka.DefaultConfig(), tmc)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error creating topic manager: %v", err)
 	}
-	group1, err := sarama.NewConsumerGroupFromClient("c1", client)
+	defer tm.Close()
+	err = tm.EnsureStreamExists(string(topic), 8)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error creating kafka topic %s: %v", topic, err)
 	}
-	defer group1.Close()
-	wg.Add(9)
-	go consume(&group1, &wg, "c1")
-	wg.Wait()
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-	select {
-	case <-signals:
-	}
+	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
+	runProcessor(&uTrips)
 }

@@ -1,12 +1,18 @@
 version: "3.8"
 
 services:
+
   zookeeper:
+    networks:
+      - goka_network
     image: confluentinc/cp-zookeeper:6.2.5
     container_name: trips-api-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+
   kafka:
+    networks:
+      - goka_network
     image: confluentinc/cp-kafka:6.2.5
     container_name: trips-api-kafka
     depends_on:
@@ -15,3 +21,14 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_INTERNAL://broker:29092'
+
+  api:
+    build: ./ideation/app
+    networks:
+      - goka_network
+    ports:
+      - 8000:8000
+
+  networks:
+      goka_network:
+          driver: bridge
