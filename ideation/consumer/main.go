@@ -33,6 +33,59 @@ func init() {
 
 }
 
+type trips struct {
+	Trips       *ongoingTrips
+	GokaContext goka.Context
+}
+
+func (trps trips) Callback() goka.ProcessCallback {
+	return func(ctx goka.Context, msg interface{}) {
+
+		timeVal := gjson.Get(msg.(string), "Start").Str
+		currentSpeed := gjson.Get(msg.(string), "LatestSpeed").Float()
+		lat := gjson.Get(msg.(string), "Latitude").Float()
+		lon := gjson.Get(msg.(string), "Longitude").Float()
+
+		var currentTime time.Time
+		var err error
+		if timeVal != "" {
+			currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+		} else {
+			currentTime = time.Time{}
+		}
+
+		coords := coordinates{Latitude: lat, Longitude: lon}
+		if currentSpeed > 0 {
+			if val, ok := trps.Trips.data[ctx.Key()]; ok {
+				if currentTime.Sub(val.LatestTime).Minutes() < 15 {
+					if currentSpeed > 0.0 {
+						trps.Trips.RefreshLatestTime(currentTime, val.UserID)
+						trps.Trips.AddCoordToRoute(coords, val.UserID)
+					}
+
+				} else {
+					fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
+					trps.Trips.Delete(val.UserID)
+
+					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+					trps.Trips.Put(&newTrip)
+					trps.Trips.AutoExpire(time.Minute*10, newTrip.UserID)
+				}
+
+			} else {
+				newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+				trps.Trips.Put(&newTrip)
+				trps.Trips.AutoExpire(time.Minute*10, newTrip.UserID)
+			}
+
+		}
+	}
+}
+
 type userTrip struct {
 	UserID         string
 	Start          time.Time
@@ -214,7 +267,6 @@ func runProcessor(trps *ongoingTrips) {
 					}
 
 				} else {
-					fmt.Println("new user")
 					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
 					trps.Put(&newTrip)
 					trps.AutoExpire(time.Minute*10, newTrip.UserID)

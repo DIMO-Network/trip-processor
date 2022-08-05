@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  postgis:
+    image: kartoza/postgis
+    networks:
+      - trips-net
+    ports:
+      - 5433:5432
+    environment:
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    # restart: on-failure
+    env_file: 
+        - ./.env
+
+  pg_tileserv:
+    image: pramsey/pg_tileserv:latest-alpine-3.12
+    networks:
+      - trips-net
+    build:
+      context: ./internal/maps/pg_tileserv
+      dockerfile: Dockerfile
+      args:
+        VERSION: latest-alpine-3.12
+    container_name: pg_tileserv
+    env_file:
+      - ./.env
+    depends_on:
+      - postgis
+    ports:
+      - 7800:7800
+
+  api:
+    build: .
+    volumes:
+      - ./:/app
+    networks:
+      - trips-net
+    env_file: 
+      - ./.env
+    ports:
+      - 3000:3000
+    
+networks:
+  trips-net:
+    driver: bridge
+
+volumes:
+  postgis_data:

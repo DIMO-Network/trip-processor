@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
 	"github.com/lovoo/goka"
 	"github.com/lovoo/goka/codec"
 	"github.com/tidwall/gjson"
@@ -30,8 +32,8 @@ type coordinates struct {
 	Longitude float64
 }
 
-// A user is the object that is stored in the processor's group table
-type user struct {
+// A trip is the object that is stored in the processor's group table
+type trip struct {
 	Key         string    `json:"Key"`
 	Start       string    `json:"Start"`
 	LatestTime  time.Time `json:"LatestTime"`
@@ -39,9 +41,9 @@ type user struct {
 	Route       []coordinates
 }
 
-// This codec allows marshalling (encode) and unmarshalling (decode) the user to and from the
+// This codec allows marshalling (encode) and unmarshalling (decode) the trip to and from the
 // group table.
-type userCodec struct{}
+type tripCodec struct{}
 
 func init() {
 	tmc = goka.NewTopicManagerConfig()
@@ -49,28 +51,28 @@ func init() {
 	tmc.Stream.Replication = 1
 }
 
-// Encodes a user into []byte
-func (jc *userCodec) Encode(value interface{}) ([]byte, error) {
-	if _, isUser := value.(*user); !isUser {
-		return nil, fmt.Errorf("Codec requires value *user, got %T", value)
+// Encodes a trip into []byte
+func (jc *tripCodec) Encode(value interface{}) ([]byte, error) {
+	if _, istrip := value.(*trip); !istrip {
+		return nil, fmt.Errorf("Codec requires value *trip, got %T", value)
 	}
 	return json.Marshal(value)
 }
 
-// Decodes a user from []byte to it's go representation.
-func (jc *userCodec) Decode(data []byte) (interface{}, error) {
+// Decodes a trip from []byte to it's go representation.
+func (jc *tripCodec) Decode(data []byte) (interface{}, error) {
 	var (
-		c   user
+		c   trip
 		err error
 	)
 	err = json.Unmarshal(data, &c)
 	if err != nil {
-		return nil, fmt.Errorf("Error unmarshaling user: %v", err)
+		return nil, fmt.Errorf("Error unmarshaling trip: %v", err)
 	}
 	return &c, nil
 }
 
-func runEmitter() {
+func runDataEmitter() {
 	emitter, err := goka.NewEmitter(brokers, topic,
 		new(codec.String))
 	if err != nil {
@@ -87,45 +89,79 @@ func runEmitter() {
 	}
 }
 
-func process(ctx goka.Context, msg interface{}) {
-	var newRecord *user
+func runCompletedTripsEmitter() {
+	emitter, err := goka.NewEmitter(brokers, "completed-trips",
+		new(codec.String))
+	if err != nil {
+		panic(err)
+	}
+	defer emitter.Finish()
+}
+
+func process(ctx goka.Context, deviceData interface{}) {
+	var devicePointInTime *trip
 	var coords coordinates
 	var err error
-	json.Unmarshal([]byte(msg.(string)), &newRecord)
-	json.Unmarshal([]byte(msg.(string)), &coords)
+	json.Unmarshal([]byte(deviceData.(string)), &devicePointInTime)
+	json.Unmarshal([]byte(deviceData.(string)), &coords)
 
-	newRecord.LatestTime, err = time.Parse("2006-01-02T15:04:05", newRecord.Start)
+	devicePointInTime.LatestTime, err = time.Parse("2006-01-02T15:04:05", devicePointInTime.Start)
 	if err != nil {
 		fmt.Println(err)
 	}
 
 	if val := ctx.Value(); val != nil {
-		existingRecord := val.(*user)
-		if newRecord.LatestSpeed > 0 {
-			if newRecord.LatestTime.Sub(existingRecord.LatestTime).Minutes() < 15 && newRecord.LatestTime.Sub(existingRecord.LatestTime).Minutes() > 15 {
+		existingRecord := val.(*trip)
+		if devicePointInTime.LatestSpeed > 0 {
+			if devicePointInTime.LatestTime.Sub(existingRecord.LatestTime).Minutes() < 15 {
 				existingRecord.Route = append(existingRecord.Route, coords)
-				existingRecord.LatestTime = newRecord.LatestTime
+				existingRecord.LatestTime = devicePointInTime.LatestTime
 				ctx.Delete()
 				ctx.SetValue(existingRecord)
-				fmt.Println("Record Updated: ", existingRecord.Key, existingRecord.Route)
+				// fmt.Println("Record Updated: ", existingRecord.Key, existingRecord.Route)
 			} else {
-				// fmt.Println("Deleted Record Due to Time Out")
+				ctx.Emit("completed-trips", ctx.Key(), existingRecord)
+				psqlInfo := fmt.Sprintf(
+					"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
+				)
+				db, err := sql.Open("postgres", psqlInfo)
+				if err != nil {
+					panic(err)
+				}
+				err = db.Ping()
+				if err != nil {
+					panic(err)
+				}
+				for n := 0; n < len(existingRecord.Route); n++ {
+
+					geometry := fmt.Sprintf("POINT(%f %f)", existingRecord.Route[n].Longitude, existingRecord.Route[n].Latitude)
+					query := `INSERT INTO trips (devicekey, geom, pointnum) VALUES ($1, $2, $3)`
+					_, err := db.Exec(query, ctx.Key(), geometry, n)
+					if err != nil {
+						fmt.Println(err)
+					}
+				}
+
 				ctx.Delete()
+				devicePointInTime.Route = append(devicePointInTime.Route, coords)
+				ctx.SetValue(devicePointInTime)
+				// fmt.Println("New Record Created: ", newRecord.Key, newRecord.Route, ctx.Partition())
 			}
 		} else {
 			// fmt.Println("Speed not above 0")
 		}
 	} else {
-		newRecord.Route = append(newRecord.Route, coords)
-		ctx.SetValue(newRecord)
-		fmt.Println("New Record Created: ", newRecord.Key, newRecord.Route, ctx.Partition())
+		devicePointInTime.Route = append(devicePointInTime.Route, coords)
+		ctx.SetValue(devicePointInTime)
+		// fmt.Println("New Record Created: ", newRecord.Key, newRecord.Route, ctx.Partition())
 	}
 }
 
 func runProcessor(initialized chan struct{}) {
 	g := goka.DefineGroup(group,
 		goka.Input(topic, new(codec.String), process),
-		goka.Persist(new(userCodec)),
+		goka.Persist(new(tripCodec)),
+		goka.Output("completed-trips", new(tripCodec)),
 	)
 	p, err := goka.NewProcessor(brokers,
 		g,
@@ -146,7 +182,7 @@ func runView(initialized chan struct{}) {
 
 	view, err := goka.NewView(brokers,
 		goka.GroupTable(group),
-		new(userCodec),
+		new(tripCodec),
 	)
 	if err != nil {
 		panic(err)
@@ -154,11 +190,11 @@ func runView(initialized chan struct{}) {
 
 	root := mux.NewRouter()
 	root.HandleFunc("/{key}", func(w http.ResponseWriter, r *http.Request) {
-		// var userRecord *user
+		// var tripRecord *trip
 		value, _ := view.Get(mux.Vars(r)["key"])
 		data, _ := json.Marshal(value)
-		// json.Unmarshal(data, &userRecord)
-		// result, _ := json.Marshal(userRecord.Route)
+		// json.Unmarshal(data, &tripRecord)
+		// result, _ := json.Marshal(tripRecord.Route)
 		w.Write(data)
 	})
 	fmt.Println("View opened at http://localhost:9095/")
@@ -200,12 +236,12 @@ func main() {
 	if err != nil {
 		log.Printf("Error creating kafka topic %s: %v", topic, err)
 	}
-
 	// When this example is run the first time, wait for creation of all internal topics (this is done
 	// by goka.NewProcessor)
 	initialized := make(chan struct{})
 
 	// go runEmitter()
+	go runCompletedTripsEmitter()
 	go runProcessor(initialized)
 	runView(initialized)
 }
