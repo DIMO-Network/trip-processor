@@ -72,7 +72,7 @@ func main() {
 		}
 		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(key), Value: sarama.StringEncoder(fmt.Sprintf(`{"Key": "%s", "LatestSpeed": %f, "Start": "%s", "Latitude": %f, "Longitude": %f}`, key, speed, timestamp, lat, lon))}
 		p, o, err := producer.SendMessage(message)
-		fmt.Println(p, o, key)
+		fmt.Println(p, o, key, message.Value)
 		if err != nil {
 			errors++
 			log.Println(err)

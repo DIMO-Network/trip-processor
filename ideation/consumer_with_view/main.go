@@ -28,8 +28,9 @@ var (
 )
 
 type coordinates struct {
-	Latitude  float64
-	Longitude float64
+	Latitude  float64 `json:"Latitude"`
+	Longitude float64 `json:"Longitude"`
+	Timestamp string  `json:"Start"`
 }
 
 // A trip is the object that is stored in the processor's group table
@@ -135,13 +136,18 @@ func process(ctx goka.Context, deviceData interface{}) {
 				for n := 0; n < len(existingRecord.Route); n++ {
 
 					geometry := fmt.Sprintf("POINT(%f %f)", existingRecord.Route[n].Longitude, existingRecord.Route[n].Latitude)
-					query := `INSERT INTO trips (devicekey, geom, pointnum) VALUES ($1, $2, $3)`
-					_, err := db.Exec(query, ctx.Key(), geometry, n)
-					if err != nil {
-						fmt.Println(err)
+					if existingRecord.Route[n].Longitude != 0.0 && existingRecord.Route[n].Latitude != 0.0 {
+						query := `INSERT INTO trips (devicekey, geom, pointnum, coord_timestamp) VALUES ($1, $2, $3, $4)`
+						_, err := db.Exec(query, ctx.Key(), geometry, n, existingRecord.Route[n].Timestamp)
+						if err != nil {
+							fmt.Println(err)
+						}
+					} else {
+						fmt.Println(json.Unmarshal([]byte(deviceData.(string)), &coords))
+						fmt.Println(deviceData.(string))
+						fmt.Println(coords)
 					}
 				}
-
 				ctx.Delete()
 				devicePointInTime.Route = append(devicePointInTime.Route, coords)
 				ctx.SetValue(devicePointInTime)
