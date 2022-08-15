@@ -40,6 +40,7 @@ type trip struct {
 	LatestTime  time.Time `json:"LatestTime"`
 	LatestSpeed float64   `json:"LatestSpeed"`
 	Route       []coordinates
+	// AutoExpireTrip *time.Timer
 }
 
 // This codec allows marshalling (encode) and unmarshalling (decode) the trip to and from the
@@ -99,14 +100,25 @@ func runCompletedTripsEmitter() {
 	defer emitter.Finish()
 }
 
-func process(ctx goka.Context, deviceData interface{}) {
-	var devicePointInTime *trip
+func ingestRecord(record interface{}) (*trip, error) {
+	var deviceData *trip
 	var coords coordinates
 	var err error
-	json.Unmarshal([]byte(deviceData.(string)), &devicePointInTime)
-	json.Unmarshal([]byte(deviceData.(string)), &coords)
+	json.Unmarshal([]byte(record.(string)), &deviceData)
+	json.Unmarshal([]byte(record.(string)), &coords)
 
-	devicePointInTime.LatestTime, err = time.Parse("2006-01-02T15:04:05", devicePointInTime.Start)
+	deviceData.LatestTime, err = time.Parse("2006-01-02T15:04:05", deviceData.Start)
+	if err != nil {
+		return &trip{}, nil
+	}
+
+	deviceData.Route = append(deviceData.Route, coords)
+	return deviceData, nil
+}
+
+func process(ctx goka.Context, deviceData interface{}) {
+
+	devicePointInTime, err := ingestRecord(deviceData)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -115,7 +127,7 @@ func process(ctx goka.Context, deviceData interface{}) {
 		existingRecord := val.(*trip)
 		if devicePointInTime.LatestSpeed > 0 {
 			if devicePointInTime.LatestTime.Sub(existingRecord.LatestTime).Minutes() < 15 {
-				existingRecord.Route = append(existingRecord.Route, coords)
+				existingRecord.Route = append(existingRecord.Route, devicePointInTime.Route[0])
 				existingRecord.LatestTime = devicePointInTime.LatestTime
 				ctx.Delete()
 				ctx.SetValue(existingRecord)
@@ -133,6 +145,7 @@ func process(ctx goka.Context, deviceData interface{}) {
 				if err != nil {
 					panic(err)
 				}
+
 				for n := 0; n < len(existingRecord.Route); n++ {
 
 					geometry := fmt.Sprintf("POINT(%f %f)", existingRecord.Route[n].Longitude, existingRecord.Route[n].Latitude)
@@ -143,13 +156,10 @@ func process(ctx goka.Context, deviceData interface{}) {
 							fmt.Println(err)
 						}
 					} else {
-						fmt.Println(json.Unmarshal([]byte(deviceData.(string)), &coords))
-						fmt.Println(deviceData.(string))
-						fmt.Println(coords)
+						fmt.Println(devicePointInTime.Route)
 					}
 				}
 				ctx.Delete()
-				devicePointInTime.Route = append(devicePointInTime.Route, coords)
 				ctx.SetValue(devicePointInTime)
 				// fmt.Println("New Record Created: ", newRecord.Key, newRecord.Route, ctx.Partition())
 			}
@@ -157,7 +167,6 @@ func process(ctx goka.Context, deviceData interface{}) {
 			// fmt.Println("Speed not above 0")
 		}
 	} else {
-		devicePointInTime.Route = append(devicePointInTime.Route, coords)
 		ctx.SetValue(devicePointInTime)
 		// fmt.Println("New Record Created: ", newRecord.Key, newRecord.Route, ctx.Partition())
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Shopify/sarama"
+	_ "github.com/lib/pq"
 	"github.com/lovoo/goka"
 	"github.com/lovoo/goka/codec"
 	"github.com/tidwall/gjson"
@@ -38,54 +40,6 @@ type trips struct {
 	GokaContext goka.Context
 }
 
-func (trps trips) Callback() goka.ProcessCallback {
-	return func(ctx goka.Context, msg interface{}) {
-
-		timeVal := gjson.Get(msg.(string), "Start").Str
-		currentSpeed := gjson.Get(msg.(string), "LatestSpeed").Float()
-		lat := gjson.Get(msg.(string), "Latitude").Float()
-		lon := gjson.Get(msg.(string), "Longitude").Float()
-
-		var currentTime time.Time
-		var err error
-		if timeVal != "" {
-			currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
-			if err != nil {
-				log.Fatal(err)
-				return
-			}
-		} else {
-			currentTime = time.Time{}
-		}
-
-		coords := coordinates{Latitude: lat, Longitude: lon}
-		if currentSpeed > 0 {
-			if val, ok := trps.Trips.data[ctx.Key()]; ok {
-				if currentTime.Sub(val.LatestTime).Minutes() < 15 {
-					if currentSpeed > 0.0 {
-						trps.Trips.RefreshLatestTime(currentTime, val.UserID)
-						trps.Trips.AddCoordToRoute(coords, val.UserID)
-					}
-
-				} else {
-					fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
-					trps.Trips.Delete(val.UserID)
-
-					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
-					trps.Trips.Put(&newTrip)
-					trps.Trips.AutoExpire(time.Minute*10, newTrip.UserID)
-				}
-
-			} else {
-				newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
-				trps.Trips.Put(&newTrip)
-				trps.Trips.AutoExpire(time.Minute*10, newTrip.UserID)
-			}
-
-		}
-	}
-}
-
 type userTrip struct {
 	UserID         string
 	Start          time.Time
@@ -99,11 +53,13 @@ type userTrip struct {
 type coordinates struct {
 	Latitude  float64
 	Longitude float64
+	Timestamp time.Time
 }
 
 type ongoingTrips struct {
-	data map[string]*userTrip
-	mu   sync.Mutex
+	data  map[string]*userTrip
+	count int
+	mu    sync.Mutex
 }
 
 func (t *ongoingTrips) Get(s string) (*userTrip, bool) {
@@ -178,53 +134,6 @@ func (t *ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
 	return nil
 }
 
-func processTripsWithoutTimer(trps *ongoingTrips, msg *sarama.ConsumerMessage) {
-
-	timeVal := gjson.Get(string(msg.Value), "Start").Str
-	currentSpeed := gjson.Get(string(msg.Value), "LatestSpeed").Float()
-	lat := gjson.Get(string(msg.Value), "Latitude").Float()
-	lon := gjson.Get(string(msg.Value), "Longitude").Float()
-
-	var currentTime time.Time
-	var err error
-	if timeVal != "" {
-		currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-	} else {
-		currentTime = time.Time{}
-	}
-
-	coords := coordinates{Latitude: lat, Longitude: lon}
-
-	if currentSpeed > 0 {
-		if val, ok := trps.data[string(msg.Key)]; ok {
-			if currentTime.Sub(val.LatestTime).Minutes() < 15 {
-				if currentSpeed > 0.0 {
-					trps.RefreshLatestTime(currentTime, val.UserID)
-					trps.AddCoordToRoute(coords, val.UserID)
-				}
-
-			} else {
-				fmt.Println("\n\nUser: ", string(msg.Key), "\nTrip Completed: ", val.Route)
-				trps.Delete(val.UserID)
-
-				newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
-				trps.Put(&newTrip)
-				trps.AutoExpire(time.Minute*10, newTrip.UserID)
-			}
-
-		} else {
-			newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: string(msg.Key), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
-			trps.Put(&newTrip)
-			trps.AutoExpire(time.Minute*10, newTrip.UserID)
-		}
-
-	}
-}
-
 // process messages until ctrl-c is pressed
 func runProcessor(trps *ongoingTrips) {
 	// process callback is invoked for each message delivered from
@@ -247,8 +156,8 @@ func runProcessor(trps *ongoingTrips) {
 			} else {
 				currentTime = time.Time{}
 			}
-
-			coords := coordinates{Latitude: lat, Longitude: lon}
+			// determining if a coords reading is part of an earlier trip (timestamp > 15 min but coords are significantly diff than last time)
+			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime}
 			if currentSpeed > 0 {
 				if val, ok := trps.data[ctx.Key()]; ok {
 					if currentTime.Sub(val.LatestTime).Minutes() < 15 {
@@ -259,6 +168,32 @@ func runProcessor(trps *ongoingTrips) {
 
 					} else {
 						fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
+
+						psqlInfo := fmt.Sprintf(
+							"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
+						)
+						db, err := sql.Open("postgres", psqlInfo)
+						if err != nil {
+							panic(err)
+						}
+						err = db.Ping()
+						if err != nil {
+							panic(err)
+						}
+						for n := 0; n < len(val.Route); n++ {
+
+							geometry := fmt.Sprintf("POINT(%f %f)", val.Route[n].Longitude, val.Route[n].Latitude)
+							if val.Route[n].Longitude != 0.0 && val.Route[n].Latitude != 0.0 {
+								query := `INSERT INTO trips (devicekey, geom, pointnum, coord_timestamp, speed, tripid) VALUES ($1, $2, $3, $4, $5, $6)`
+								_, err := db.Exec(query, ctx.Key(), geometry, n, val.Route[n].Timestamp, val.LatestSpeed, trps.count)
+								if err != nil {
+									fmt.Println(err)
+								}
+							} else {
+								fmt.Println("coords were null? ", msg.(string))
+							}
+						}
+						trps.count++
 						trps.Delete(val.UserID)
 
 						newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}

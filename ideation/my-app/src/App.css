@@ -1,0 +1,41 @@
+.App {
+  text-align: center;
+}
+
+.Container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: red;
+  justify-content: center;
+  align-items: center;
+  /* border-radius: 3px; */
+}
+
+.Table {
+  width: 100%;
+  height: 100%;
+  background-color: blueviolet;
+}
+
+.DropDown {
+  width: 100%;
+  height: 100%;
+}
+
+table {
+  font-family: 'Roboto', sans-serif;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+td, th {
+  border: 1px solid #dddddd;
+  text-align: left;
+  padding: 8px;
+}
+
+tr:nth-child(even) {
+  background-color: #dddddd;
+}

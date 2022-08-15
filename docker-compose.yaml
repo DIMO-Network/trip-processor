@@ -23,7 +23,7 @@ services:
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_INTERNAL://broker:29092'
 
   api:
-    build: ./ideation/app
+    build: ./ideation/api
     networks:
       - goka_network
     ports:

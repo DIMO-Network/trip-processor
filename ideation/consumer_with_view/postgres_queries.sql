@@ -1,5 +1,5 @@
 
-CREATE TABLE trips (devicekey varchar, geom geometry, pointnum varchar, coord_timestamp date);
+CREATE TABLE trips (devicekey varchar, geom geometry, pointnum varchar, coord_timestamp varchar, speed float, tripid int);
 
 ALTER TABLE trips
   ALTER COLUMN geom TYPE geometry(POINT, 4326)
@@ -11,6 +11,8 @@ SELECT devicekey, pointnum, ST_MakeLine(geom) geom FROM trips GROUP BY devicekey
 
 ALTER TABLE trips DROP COLUMN endtime;
 select * from trips limit 4;
+
+SELECT devicekey, ST_MakeLine(trps.geom ORDER BY pointnum::int), CONCAT(pointnum, " ") FROM trips as trps GROUP BY devicekey
 
 CREATE OR REPLACE
 FUNCTION public.device_trips(
@@ -26,7 +28,7 @@ BEGIN
       SELECT ST_TileEnvelope(z, x, y) AS geom
     ),
     lines AS (
-      SELECT trps.devicekey, ST_MakeLine(trps.geom ORDER BY pointnum::int) geom FROM trips AS trps GROUP BY devicekey
+      SELECT trps.devicekey, trps.tripid, ST_MakeLine(trps.geom ORDER BY pointnum::int) geom FROM trips AS trps GROUP BY devicekey, tripid
     ),
     mvtgeom AS (
         SELECT ST_AsMVTGeom(ST_Transform(t.geom, 3857), bounds.geom) AS geom, t.devicekey
@@ -74,3 +76,7 @@ CREATE TABLE linetest AS (
 ALTER TABLE linetest
   ALTER COLUMN geom TYPE geometry(LINESTRING, 4326)
     USING ST_SetSRID(geom,4326);
+
+
+SELECT ST_Centroid(ST_UNION(geom)), devicekey FROM public.trips 
+GROUP BY devicekey;
