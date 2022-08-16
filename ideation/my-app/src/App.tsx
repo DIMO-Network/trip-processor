@@ -19,6 +19,7 @@ interface DeviceInfo {
   order: number;
   timestamp: string;
   speed: number;
+  odometer: number;
 }
 
 interface DeviceMetaData {
@@ -39,6 +40,21 @@ function App() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo[]>([]);
   const [mapCenter, setMapCenter] = useState<Coordinates>({} as Coordinates);
   const [selectedDevice, setSelectedDevice] = useState("");
+  const [mapkey, setMapKey] = useState(0);
+
+  const [tileserver, setTileserver] = useState(
+    "http://localhost:7800/public.device_trips,public.trips/{z}/{x}/{y}.pbf",
+  );
+
+  useEffect(() => {
+    if (selectedDevice !== "") {
+      setTileserver(
+        "http://localhost:7800/public.device_trips,public.trips/{z}/{x}/{y}.pbf?device_key=" +
+          selectedDevice,
+      );
+      setMapKey(mapkey + 1);
+    }
+  }, [selectedDevice]);
 
   useEffect(() => {
     fetch("http://localhost:8000/alldevices")
@@ -110,11 +126,9 @@ function App() {
       <h1>DIMO User Trips 🚗</h1>
       <div className="Container">
         <MapBox
+          key={mapkey}
           onStyleLoad={(map) => {
-            addHeatMap(
-              map,
-              "http://localhost:7800/public.device_trips,public.trips/{z}/{x}/{y}.pbf",
-            );
+            addHeatMap(map, tileserver);
           }}
           zoom={mapCenter.zoom ? [mapCenter.zoom] : [2.5]}
           center={mapCenter.lat ? [mapCenter.lon, mapCenter.lat] : [-50.200489, 37.38948]}
@@ -136,7 +150,7 @@ function App() {
               value={selectedDevice}
               onChange={(e) => {
                 const data = JSON.parse(e.target.value) as DeviceMetaData;
-                setMapCenter({ lat: data.lat, lon: data.lon, zoom: 7 });
+                setMapCenter({ lat: data.lat, lon: data.lon, zoom: 10 });
                 setSelectedDevice(data.deviceID);
               }}
             >
@@ -164,6 +178,7 @@ function App() {
                               <th>Longitude</th>
                               <th>Longitude</th>
                               <th>Speed</th>
+                              <th>Odometer</th>
                               <th>Timestamp</th>
                             </tr>
                           </thead>
@@ -172,6 +187,7 @@ function App() {
                             <th>{info.lat}</th>
                             <th>{info.lon}</th>
                             <th>{info.speed}</th>
+                            <th>{info.odometer}</th>
                             <th>{info.timestamp}</th>
                           </tr>
                         </>
@@ -183,6 +199,7 @@ function App() {
                           <th>{info.lat}</th>
                           <th>{info.lon}</th>
                           <th>{info.speed}</th>
+                          <th>{info.odometer}</th>
                           <th>{info.timestamp}</th>
                         </tr>
                       );

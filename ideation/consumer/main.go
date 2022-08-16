@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -24,6 +25,7 @@ var (
 	group   goka.Group  = "mini-group"
 
 	tmc *goka.TopicManagerConfig
+	db  *sql.DB
 )
 
 func init() {
@@ -33,6 +35,18 @@ func init() {
 	tmc.Table.Replication = 1
 	tmc.Stream.Replication = 1
 
+	psqlInfo := fmt.Sprintf(
+		"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
+	)
+	var err error
+	db, err = sql.Open("postgres", psqlInfo)
+	if err != nil {
+		panic(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
 }
 
 type trips struct {
@@ -44,7 +58,6 @@ type userTrip struct {
 	UserID         string
 	Start          time.Time
 	LatestTime     time.Time
-	LatestSpeed    float64
 	AutoExpireTrip *time.Timer
 	Route          []coordinates
 	mu             *sync.Mutex
@@ -54,6 +67,8 @@ type coordinates struct {
 	Latitude  float64
 	Longitude float64
 	Timestamp time.Time
+	Speed     float64
+	Odometer  float64
 }
 
 type ongoingTrips struct {
@@ -134,8 +149,28 @@ func (t *ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
 	return nil
 }
 
+// calcuate the distance between two coordinate pairs, returns KM
+func distanceBetweenCoords(lat1 float64, lng1 float64, lat2 float64, lng2 float64) float64 {
+	radlat1 := float64(math.Pi * lat1 / 180)
+	radlat2 := float64(math.Pi * lat2 / 180)
+
+	theta := float64(lng1 - lng2)
+	radtheta := float64(math.Pi * theta / 180)
+
+	dist := math.Sin(radlat1)*math.Sin(radlat2) + math.Cos(radlat1)*math.Cos(radlat2)*math.Cos(radtheta)
+	if dist > 1 {
+		dist = 1
+	}
+
+	dist = math.Acos(dist)
+	dist = dist * 180 / math.Pi
+	dist = dist * 60 * 1.1515
+	return dist * 1.60934 // distance as kilometers
+}
+
 // process messages until ctrl-c is pressed
 func runProcessor(trps *ongoingTrips) {
+
 	// process callback is invoked for each message delivered from
 	cb := func(trps *ongoingTrips) goka.ProcessCallback {
 		return func(ctx goka.Context, msg interface{}) {
@@ -144,6 +179,7 @@ func runProcessor(trps *ongoingTrips) {
 			currentSpeed := gjson.Get(msg.(string), "LatestSpeed").Float()
 			lat := gjson.Get(msg.(string), "Latitude").Float()
 			lon := gjson.Get(msg.(string), "Longitude").Float()
+			odometer := gjson.Get(msg.(string), "Odometer").Float()
 
 			var currentTime time.Time
 			var err error
@@ -157,57 +193,51 @@ func runProcessor(trps *ongoingTrips) {
 				currentTime = time.Time{}
 			}
 			// determining if a coords reading is part of an earlier trip (timestamp > 15 min but coords are significantly diff than last time)
-			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime}
-			if currentSpeed > 0 {
-				if val, ok := trps.data[ctx.Key()]; ok {
-					if currentTime.Sub(val.LatestTime).Minutes() < 15 {
-						if currentSpeed > 0.0 {
-							trps.RefreshLatestTime(currentTime, val.UserID)
-							trps.AddCoordToRoute(coords, val.UserID)
-						}
+			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime, Speed: currentSpeed, Odometer: odometer}
+			if val, ok := trps.data[ctx.Key()]; ok {
+				if currentTime.Sub(val.LatestTime).Minutes() < 15 || coords.Odometer != val.Route[len(val.Route)-1].Odometer {
+					if coords.Odometer == val.Route[len(val.Route)-1].Odometer {
+						val.Route[len(val.Route)-1] = coords
+					}
 
-					} else {
+					trps.RefreshLatestTime(currentTime, val.UserID)
+					trps.AddCoordToRoute(coords, val.UserID)
+
+				} else {
+					// observedDistance := distanceBetweenCoords(val.Route[len(val.Route)-1].Longitude, val.Route[len(val.Route)-1].Latitude, coords.Longitude, coords.Longitude)
+					// traveledDistance := coords.Odometer - val.Route[len(val.Route)-1].Odometer
+
+					if len(val.Route) > 1 {
 						fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
-
-						psqlInfo := fmt.Sprintf(
-							"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
-						)
-						db, err := sql.Open("postgres", psqlInfo)
-						if err != nil {
-							panic(err)
-						}
-						err = db.Ping()
-						if err != nil {
-							panic(err)
-						}
 						for n := 0; n < len(val.Route); n++ {
 
 							geometry := fmt.Sprintf("POINT(%f %f)", val.Route[n].Longitude, val.Route[n].Latitude)
 							if val.Route[n].Longitude != 0.0 && val.Route[n].Latitude != 0.0 {
-								query := `INSERT INTO trips (devicekey, geom, pointnum, coord_timestamp, speed, tripid) VALUES ($1, $2, $3, $4, $5, $6)`
-								_, err := db.Exec(query, ctx.Key(), geometry, n, val.Route[n].Timestamp, val.LatestSpeed, trps.count)
+								query := `INSERT INTO trips (devicekey, geom, pointnum, coord_timestamp, speed, odometer, tripid) VALUES ($1, $2, $3, $4, $5, $6, $7)`
+								_, err := db.Exec(query, ctx.Key(), geometry, n, val.Route[n].Timestamp, val.Route[n].Speed, val.Route[n].Odometer, trps.count)
 								if err != nil {
 									fmt.Println(err)
 								}
-							} else {
-								fmt.Println("coords were null? ", msg.(string))
 							}
 						}
 						trps.count++
 						trps.Delete(val.UserID)
 
-						newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+						newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
 						trps.Put(&newTrip)
 						trps.AutoExpire(time.Minute*10, newTrip.UserID)
 					}
 
-				} else {
-					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), LatestSpeed: currentSpeed, Route: []coordinates{coords}}
+				}
+
+			} else {
+				if currentSpeed > 0 {
+					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
 					trps.Put(&newTrip)
 					trps.AutoExpire(time.Minute*10, newTrip.UserID)
 				}
-
 			}
+
 		}
 	}
 
@@ -262,6 +292,7 @@ func main() {
 	if err != nil {
 		log.Printf("Error creating kafka topic %s: %v", topic, err)
 	}
+
 	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
 	runProcessor(&uTrips)
 }

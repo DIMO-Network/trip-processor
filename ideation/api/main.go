@@ -19,6 +19,7 @@ type DevicePointInTime struct {
 	Order     int     `json:"order"`
 	Timestamp string  `json:"timestamp"`
 	Speed     float64 `json:"speed"`
+	Odometer  float64 `json:"odometer"`
 }
 
 type DeviceMetaData struct {
@@ -75,14 +76,14 @@ func getAllDeviceIDsHandler(c *fiber.Ctx) error {
 func getUserTrips(c *fiber.Ctx) error {
 	deviceID := c.Params("deviceID")
 	deviceInfo := make([]DevicePointInTime, 0)
-	userSQL := "SELECT ST_X(geom) lon, ST_Y(geom) lat, pointnum as order, coord_timestamp as timestamp, speed FROM public.trips WHERE devicekey = $1;"
+	userSQL := "SELECT ST_X(geom) lon, ST_Y(geom) lat, pointnum as order, coord_timestamp as timestamp, speed, odometer FROM public.trips WHERE devicekey = $1;"
 	rows, err := db.Query(userSQL, deviceID)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var deviceDataPoint DevicePointInTime
-		err := rows.Scan(&deviceDataPoint.Longitude, &deviceDataPoint.Latitude, &deviceDataPoint.Order, &deviceDataPoint.Timestamp, &deviceDataPoint.Speed)
+		err := rows.Scan(&deviceDataPoint.Longitude, &deviceDataPoint.Latitude, &deviceDataPoint.Order, &deviceDataPoint.Timestamp, &deviceDataPoint.Speed, &deviceDataPoint.Odometer)
 		if err != nil {
 			return err
 		}
