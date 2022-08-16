@@ -68,8 +68,8 @@ function App() {
       "source-layer": "default",
       paint: {
         "circle-radius": 3,
-        "circle-color": "#223b53",
-        "circle-stroke-color": "white",
+        "circle-color": "#f5efbc",
+        "circle-stroke-color": "#f5efbc",
         "circle-stroke-width": 1,
         "circle-opacity": 0.5,
       },
@@ -89,8 +89,8 @@ function App() {
         "line-cap": "round",
       },
       paint: {
-        "line-color": "#ff69b4",
-        "line-width": 1,
+        "line-color": "#43d1d1",
+        "line-width": 3,
       },
     });
 
@@ -100,14 +100,8 @@ function App() {
 
     map.on("click", "public.trips", (event) => {
       setMapCenter({ lat: event.lngLat.lat, lon: event.lngLat.lng, zoom: map.getZoom() });
+      // eslint-disable-next-line
       setSelectedDevice(event.features![0].properties!.devicekey as string);
-      console.log("Event Features!!", event.features);
-      console.log("Selected DEvice ID: ", event.features![0].properties!.devicekey);
-      console.log("Selected Point Num: ", event.features![0].properties!.pointnum);
-      console.log(
-        "Selected Coord Timestamp: ",
-        event.features![0].properties!.coord_timestamp,
-      );
     });
   };
 
@@ -124,6 +118,7 @@ function App() {
           }}
           zoom={mapCenter.zoom ? [mapCenter.zoom] : [2.5]}
           center={mapCenter.lat ? [mapCenter.lon, mapCenter.lat] : [-50.200489, 37.38948]}
+          // eslint-disable-next-line
           style={styleUrl}
           containerStyle={{
             height: "45vh",
@@ -132,18 +127,18 @@ function App() {
         ></MapBox>
         <div className="Table">
           <div className="DropDown">
-            <h2>This is the selected device: {selectedDevice}</h2>
-            <label htmlFor="DeviceIDs">Select a Device ID:</label>
+            <h2>Selected Device: {selectedDevice}</h2>
+            <br />
+            <label htmlFor="DeviceIDs"> Select a Device ID:</label>
             <select
               name="DeviceIDs"
               id="DeviceIDs"
+              value={selectedDevice}
               onChange={(e) => {
                 const data = JSON.parse(e.target.value) as DeviceMetaData;
                 setMapCenter({ lat: data.lat, lon: data.lon, zoom: 7 });
-                console.log("logging data", data);
                 setSelectedDevice(data.deviceID);
               }}
-              value={selectedDevice}
             >
               <option key="" value="">
                 Select a device
@@ -155,25 +150,43 @@ function App() {
               ))}
             </select>
             <div>
+              <br />
               <table>
-                <tr>
-                  <th></th>
-                  <th>Longitude</th>
-                  <th>Longitude</th>
-                  <th>Speed</th>
-                  <th>Timestamp</th>
-                </tr>
                 {selectedDevice !== "" &&
                   deviceInfo.map((info, i) => {
-                    return (
-                      <tr key={i}>
-                        <th>{info.order}</th>
-                        <th>{info.lat}</th>
-                        <th>{info.lon}</th>
-                        <th>{info.speed}</th>
-                        <th>{info.timestamp}</th>
-                      </tr>
-                    );
+                    if (info.order === 0) {
+                      return (
+                        <>
+                          {info === deviceInfo[0] ? "" : <br />}
+                          <thead>
+                            <tr>
+                              <th></th>
+                              <th>Longitude</th>
+                              <th>Longitude</th>
+                              <th>Speed</th>
+                              <th>Timestamp</th>
+                            </tr>
+                          </thead>
+                          <tr key={i}>
+                            <th>{info.order}</th>
+                            <th>{info.lat}</th>
+                            <th>{info.lon}</th>
+                            <th>{info.speed}</th>
+                            <th>{info.timestamp}</th>
+                          </tr>
+                        </>
+                      );
+                    } else {
+                      return (
+                        <tr key={i}>
+                          <th>{info.order}</th>
+                          <th>{info.lat}</th>
+                          <th>{info.lon}</th>
+                          <th>{info.speed}</th>
+                          <th>{info.timestamp}</th>
+                        </tr>
+                      );
+                    }
                   })}
               </table>
             </div>
