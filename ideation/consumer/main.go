@@ -195,14 +195,15 @@ func runProcessor(trps *ongoingTrips) {
 			// determining if a coords reading is part of an earlier trip (timestamp > 15 min but coords are significantly diff than last time)
 			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime, Speed: currentSpeed, Odometer: odometer}
 			if val, ok := trps.data[ctx.Key()]; ok {
-				if currentTime.Sub(val.LatestTime).Minutes() < 15 || coords.Odometer != val.Route[len(val.Route)-1].Odometer {
+				if (currentTime.Sub(val.LatestTime).Minutes() < 15) || coords.Odometer != val.Route[len(val.Route)-1].Odometer {
+
 					if coords.Odometer == val.Route[len(val.Route)-1].Odometer {
 						val.Route[len(val.Route)-1] = coords
+						trps.RefreshLatestTime(currentTime, val.UserID)
+					} else {
+						trps.RefreshLatestTime(currentTime, val.UserID)
+						trps.AddCoordToRoute(coords, val.UserID)
 					}
-
-					trps.RefreshLatestTime(currentTime, val.UserID)
-					trps.AddCoordToRoute(coords, val.UserID)
-
 				} else {
 					// observedDistance := distanceBetweenCoords(val.Route[len(val.Route)-1].Longitude, val.Route[len(val.Route)-1].Latitude, coords.Longitude, coords.Longitude)
 					// traveledDistance := coords.Odometer - val.Route[len(val.Route)-1].Odometer
@@ -223,9 +224,11 @@ func runProcessor(trps *ongoingTrips) {
 						trps.count++
 						trps.Delete(val.UserID)
 
-						newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
-						trps.Put(&newTrip)
-						trps.AutoExpire(time.Minute*10, newTrip.UserID)
+						if currentSpeed > 0 {
+							newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
+							trps.Put(&newTrip)
+							trps.AutoExpire(time.Minute*10, newTrip.UserID)
+						}
 					}
 
 				}
