@@ -50,34 +50,40 @@ func main() {
 	}
 	var successes, errors int
 
-	jsonFile, err := os.Open("teslaMulti.json")
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer jsonFile.Close()
-	byteValue, _ := ioutil.ReadAll(jsonFile)
-
-	numResponses := gjson.Get(string(byteValue), "hits.hits.#").Int()
-
-	for i := 0; int64(i) < numResponses; i++ {
-		base := fmt.Sprintf("hits.hits.%d._source", i)
-
-		key := gjson.Get(string(byteValue), base+".subject").Str
-		speed := gjson.Get(string(byteValue), base+".data.speed").Float()
-		lat := gjson.Get(string(byteValue), base+".data.latitude").Float()
-		lon := gjson.Get(string(byteValue), base+".data.longitude").Float()
-		timestamp := strings.Replace(gjson.Get(string(byteValue), base+".data.timestamp").Str, "Z", "", 1)
-		if timestamp == "" {
-			timestamp = time.Time{}.String()
-		}
-		message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(key), Value: sarama.StringEncoder(fmt.Sprintf(`{"Key": "%s", "LatestSpeed": %f, "Start": "%s", "Latitude": %f, "Longitude": %f}`, key, speed, timestamp, lat, lon))}
-		p, o, err := producer.SendMessage(message)
-		fmt.Println(p, o, key, message.Value)
+	docs := []string{"tesla_806_1.json", "tesla_806_2.json", "tesla_806_3.json", "tesla_806_4.json", "tesla_806_5.json"}
+	// docs := []string{"teslaMulti.json"}
+	// jsonFile, err := os.Open("tesla_816.json")
+	for i := 0; i < len(docs); i++ {
+		jsonFile, err := os.Open(docs[i])
 		if err != nil {
-			errors++
-			log.Println(err)
-		} else {
-			successes++
+			fmt.Println(err)
+		}
+		defer jsonFile.Close()
+		byteValue, _ := ioutil.ReadAll(jsonFile)
+
+		numResponses := gjson.Get(string(byteValue), "hits.hits.#").Int()
+
+		for i := 0; int64(i) < numResponses; i++ {
+			base := fmt.Sprintf("hits.hits.%d._source", i)
+
+			key := gjson.Get(string(byteValue), base+".subject").Str
+			speed := gjson.Get(string(byteValue), base+".data.speed").Float()
+			lat := gjson.Get(string(byteValue), base+".data.latitude").Float()
+			lon := gjson.Get(string(byteValue), base+".data.longitude").Float()
+			odometer := gjson.Get(string(byteValue), base+".data.odometer").Float()
+			timestamp := strings.Replace(gjson.Get(string(byteValue), base+".data.timestamp").Str, "Z", "", 1)
+			if timestamp == "" {
+				timestamp = time.Time{}.String()
+			}
+			message := &sarama.ProducerMessage{Topic: topic, Key: sarama.StringEncoder(key), Value: sarama.StringEncoder(fmt.Sprintf(`{"Key": "%s", "LatestSpeed": %f, "Start": "%s", "Latitude": %f, "Longitude": %f, "Odometer": %f}`, key, speed, timestamp, lat, lon, odometer))}
+			p, o, err := producer.SendMessage(message)
+			fmt.Println(p, o, key, message.Value)
+			if err != nil {
+				errors++
+				log.Println(err)
+			} else {
+				successes++
+			}
 		}
 	}
 
