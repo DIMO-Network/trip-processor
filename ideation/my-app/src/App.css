@@ -25,11 +25,12 @@ html, body {
 }
 
 .Table {
-  width: 95%;
+  width: 100%;
   height: 100%;
   background-color: #f8f8f8;
   border-color: #323333;
   color: #323333;
+  font-size: small;
 }
 
 .DropDown {
@@ -40,7 +41,7 @@ html, body {
 table {
   font-family: 'Roboto', sans-serif;
   border-collapse: collapse;
-  width: 100%;
+  /* width: 100%; */
 }
 
 td, th {
@@ -51,4 +52,10 @@ td, th {
 
 tr:nth-child(even) {
   background-color: #BBBDBC;
+}
+
+.side-by-side {
+  display: flex;
+  /* align-items: center; */
+  justify-content: space-evenly;
 }

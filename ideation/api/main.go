@@ -14,12 +14,13 @@ var (
 )
 
 type DevicePointInTime struct {
-	Latitude  float64 `json:"lat"`
-	Longitude float64 `json:"lon"`
-	Order     int     `json:"order"`
-	Timestamp string  `json:"timestamp"`
-	Speed     float64 `json:"speed"`
-	Odometer  float64 `json:"odometer"`
+	Latitude    float64 `json:"lat"`
+	Longitude   float64 `json:"lon"`
+	Order       int     `json:"order"`
+	Timestamp   string  `json:"timestamp"`
+	Speed       float64 `json:"speed"`
+	Odometer    float64 `json:"odometer"`
+	ChargeRange float64 `json:"chargeRange"`
 }
 
 type DeviceMetaData struct {
@@ -47,7 +48,8 @@ func main() {
 		return c.SendString("Hello, World!")
 	})
 	app.Get("/alldevices", getAllDeviceIDsHandler)
-	app.Get("/device/:deviceID", getUserTrips)
+	app.Get("/odometertrip/:deviceID", getUserTripsOdometer)
+	app.Get("/speedtrip/:deviceID", getUserTripsSpeed)
 
 	app.Listen(":8000")
 }
@@ -55,7 +57,7 @@ func main() {
 func getAllDeviceIDsHandler(c *fiber.Ctx) error {
 
 	deviceIDs := make([]DeviceMetaData, 0)
-	userSQL := "SELECT devicekey, ST_Y(ST_Centroid(ST_UNION(geom))) lat, ST_X(ST_Centroid(ST_UNION(geom))) lon FROM public.trips GROUP BY devicekey;"
+	userSQL := "SELECT devicekey, ST_Y(ST_Centroid(ST_UNION(geom))) lat, ST_X(ST_Centroid(ST_UNION(geom))) lon FROM public.points_odometer GROUP BY devicekey ORDER BY devicekey;"
 	rows, err := db.Query(userSQL)
 	if err != nil {
 		return err
@@ -73,17 +75,37 @@ func getAllDeviceIDsHandler(c *fiber.Ctx) error {
 	return c.JSON(deviceIDs)
 }
 
-func getUserTrips(c *fiber.Ctx) error {
+func getUserTripsOdometer(c *fiber.Ctx) error {
 	deviceID := c.Params("deviceID")
 	deviceInfo := make([]DevicePointInTime, 0)
-	userSQL := "SELECT ST_X(geom) lon, ST_Y(geom) lat, pointnum as order, coord_timestamp as timestamp, speed, odometer FROM public.trips WHERE devicekey = $1;"
+	userSQL := "SELECT ST_X(geom) lon, ST_Y(geom) lat, pointnum as order, coord_timestamp as timestamp, speed, odometer, chargeRange FROM public.points_odometer WHERE devicekey = $1;"
 	rows, err := db.Query(userSQL, deviceID)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var deviceDataPoint DevicePointInTime
-		err := rows.Scan(&deviceDataPoint.Longitude, &deviceDataPoint.Latitude, &deviceDataPoint.Order, &deviceDataPoint.Timestamp, &deviceDataPoint.Speed, &deviceDataPoint.Odometer)
+		err := rows.Scan(&deviceDataPoint.Longitude, &deviceDataPoint.Latitude, &deviceDataPoint.Order, &deviceDataPoint.Timestamp, &deviceDataPoint.Speed, &deviceDataPoint.Odometer, &deviceDataPoint.ChargeRange)
+		if err != nil {
+			return err
+		}
+		deviceInfo = append(deviceInfo, deviceDataPoint)
+	}
+
+	return c.JSON(deviceInfo)
+}
+
+func getUserTripsSpeed(c *fiber.Ctx) error {
+	deviceID := c.Params("deviceID")
+	deviceInfo := make([]DevicePointInTime, 0)
+	userSQL := "SELECT ST_X(geom) lon, ST_Y(geom) lat, pointnum as order, coord_timestamp as timestamp, speed, odometer, chargeRange FROM public.points_speed WHERE devicekey = $1;"
+	rows, err := db.Query(userSQL, deviceID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var deviceDataPoint DevicePointInTime
+		err := rows.Scan(&deviceDataPoint.Longitude, &deviceDataPoint.Latitude, &deviceDataPoint.Order, &deviceDataPoint.Timestamp, &deviceDataPoint.Speed, &deviceDataPoint.Odometer, &deviceDataPoint.ChargeRange)
 		if err != nil {
 			return err
 		}

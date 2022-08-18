@@ -1,13 +1,16 @@
 
-CREATE TABLE trips (devicekey varchar, geom geometry, pointnum varchar, coord_timestamp varchar, speed float, tripid int);
+CREATE TABLE points_gaps (devicekey varchar, geom geometry, pointnum varchar, coord_timestamp varchar, speed float, odometer float, chargeRange float, tripid int);
 
-ALTER TABLE trips
+ALTER TABLE points_gaps
   ALTER COLUMN geom TYPE geometry(POINT, 4326)
     USING ST_SetSRID(geom,4326);
 
-DROP TABLE trips
+DROP TABLE trips_fullday
+
+ ALTER TABLE trips_odometer RENAME TO points_odometer;
 
 SELECT devicekey, pointnum, ST_MakeLine(geom) geom FROM trips GROUP BY devicekey, pointnum
+
 
 ALTER TABLE trips DROP COLUMN endtime;
 select * from trips limit 4;
@@ -15,7 +18,7 @@ select * from trips limit 4;
 SELECT devicekey, ST_MakeLine(trps.geom ORDER BY pointnum::int), CONCAT(pointnum, " ") FROM trips as trps GROUP BY devicekey
 
 CREATE OR REPLACE
-FUNCTION public.device_trips(
+FUNCTION public.trips_speed(
     z integer, x integer, y integer,
             device_key text default '')
 RETURNS bytea
@@ -28,7 +31,7 @@ BEGIN
       SELECT ST_TileEnvelope(z, x, y) AS geom
     ),
     lines AS (
-      SELECT trps.devicekey, trps.tripid, ST_MakeLine(trps.geom ORDER BY pointnum::int) geom FROM trips AS trps GROUP BY devicekey, tripid
+      SELECT trps.devicekey, trps.tripid, ST_MakeLine(trps.geom ORDER BY pointnum::int) geom FROM points_speed AS trps GROUP BY devicekey, tripid
     ),
     mvtgeom AS (
         SELECT ST_AsMVTGeom(ST_Transform(t.geom, 3857), bounds.geom) AS geom, t.devicekey

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,7 +22,7 @@ import (
 
 var (
 	brokers             = []string{"localhost:9092"}
-	topic   goka.Stream = "new-topic"
+	topic   goka.Stream = "topic.device.status"
 	group   goka.Group  = "mini-group"
 
 	tmc *goka.TopicManagerConfig
@@ -64,11 +65,12 @@ type userTrip struct {
 }
 
 type coordinates struct {
-	Latitude  float64
-	Longitude float64
-	Timestamp time.Time
-	Speed     float64
-	Odometer  float64
+	Latitude    float64
+	Longitude   float64
+	Timestamp   time.Time
+	Speed       float64
+	Odometer    float64
+	ChargeRange float64
 }
 
 type ongoingTrips struct {
@@ -174,12 +176,14 @@ func runProcessor(trps *ongoingTrips) {
 	// process callback is invoked for each message delivered from
 	cb := func(trps *ongoingTrips) goka.ProcessCallback {
 		return func(ctx goka.Context, msg interface{}) {
-
-			timeVal := gjson.Get(msg.(string), "Start").Str
-			currentSpeed := gjson.Get(msg.(string), "LatestSpeed").Float()
-			lat := gjson.Get(msg.(string), "Latitude").Float()
-			lon := gjson.Get(msg.(string), "Longitude").Float()
-			odometer := gjson.Get(msg.(string), "Odometer").Float()
+			timeVal := strings.Replace(gjson.Get(msg.(string), "data.timestamp").Str, "Z", "", 1)
+			timeVal = strings.Replace(timeVal, "-06:00", "", 1)
+			currentSpeed := gjson.Get(msg.(string), "data.speed").Float()
+			lat := gjson.Get(msg.(string), "data.latitude").Float()
+			lon := gjson.Get(msg.(string), "data.longitude").Float()
+			odometer := gjson.Get(msg.(string), "data.odometer").Float()
+			chargeRange := gjson.Get(msg.(string), "data.range").Float()
+			userID := gjson.Get(msg.(string), "subject").Str
 
 			var currentTime time.Time
 			var err error
@@ -193,9 +197,9 @@ func runProcessor(trps *ongoingTrips) {
 				currentTime = time.Time{}
 			}
 			// determining if a coords reading is part of an earlier trip (timestamp > 15 min but coords are significantly diff than last time)
-			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime, Speed: currentSpeed, Odometer: odometer}
-			if val, ok := trps.data[ctx.Key()]; ok {
-				if (currentTime.Sub(val.LatestTime).Minutes() < 15) || coords.Odometer != val.Route[len(val.Route)-1].Odometer {
+			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime, Speed: currentSpeed, Odometer: odometer, ChargeRange: chargeRange}
+			if val, ok := trps.data[userID]; ok {
+				if (currentTime.Sub(val.LatestTime).Minutes() < 15) && currentSpeed > 0 {
 
 					if coords.Odometer == val.Route[len(val.Route)-1].Odometer {
 						val.Route[len(val.Route)-1] = coords
@@ -209,13 +213,15 @@ func runProcessor(trps *ongoingTrips) {
 					// traveledDistance := coords.Odometer - val.Route[len(val.Route)-1].Odometer
 
 					if len(val.Route) > 1 {
-						fmt.Println("\n\nUser: ", ctx.Key(), "\nTrip Completed: ", val.Route)
+						if trps.count < 3 {
+							fmt.Println("\n\nUser: ", userID, "\nTrip Completed: ", val.Route)
+						}
 						for n := 0; n < len(val.Route); n++ {
 
 							geometry := fmt.Sprintf("POINT(%f %f)", val.Route[n].Longitude, val.Route[n].Latitude)
 							if val.Route[n].Longitude != 0.0 && val.Route[n].Latitude != 0.0 {
-								query := `INSERT INTO trips (devicekey, geom, pointnum, coord_timestamp, speed, odometer, tripid) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-								_, err := db.Exec(query, ctx.Key(), geometry, n, val.Route[n].Timestamp, val.Route[n].Speed, val.Route[n].Odometer, trps.count)
+								query := `INSERT INTO points_gaps (devicekey, geom, pointnum, coord_timestamp, speed, odometer, chargeRange, tripid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+								_, err := db.Exec(query, userID, geometry, n, val.Route[n].Timestamp, val.Route[n].Speed, val.Route[n].Odometer, val.Route[n].ChargeRange, trps.count)
 								if err != nil {
 									fmt.Println(err)
 								}
@@ -225,7 +231,7 @@ func runProcessor(trps *ongoingTrips) {
 						trps.Delete(val.UserID)
 
 						if currentSpeed > 0 {
-							newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
+							newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: userID, Route: []coordinates{coords}}
 							trps.Put(&newTrip)
 							trps.AutoExpire(time.Minute*10, newTrip.UserID)
 						}
@@ -235,7 +241,7 @@ func runProcessor(trps *ongoingTrips) {
 
 			} else {
 				if currentSpeed > 0 {
-					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: ctx.Key(), Route: []coordinates{coords}}
+					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: userID, Route: []coordinates{coords}}
 					trps.Put(&newTrip)
 					trps.AutoExpire(time.Minute*10, newTrip.UserID)
 				}

@@ -10,7 +10,7 @@ services:
     environment:
       - ALLOW_IP_RANGE=0.0.0.0/0
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - ./postgres-data:/var/lib/postgresql/
     # restart: on-failure
     env_file: 
         - ./.env
