@@ -3,31 +3,71 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"os/signal"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/Shopify/sarama"
 	_ "github.com/lib/pq"
 	"github.com/lovoo/goka"
 	"github.com/lovoo/goka/codec"
-	"github.com/tidwall/gjson"
 )
 
 var (
-	brokers             = []string{"localhost:9092"}
-	topic   goka.Stream = "topic.device.status"
-	group   goka.Group  = "mini-group"
+	brokers                = []string{"localhost:9092"}
+	topic      goka.Stream = "topic.device.status"
+	newRecords goka.Stream = "new_record"
+	group      goka.Group  = "mini-group"
 
 	tmc *goka.TopicManagerConfig
-	db  *sql.DB
+
+	pgController PostgresController
 )
+
+type Data struct {
+	Data struct {
+		ChargeLimit float64   `json:"chargeLimit,omitempty"`
+		Odometer    float64   `json:"odometer,omitempty"`
+		Year        int       `json:"year,omitempty"`
+		Soc         float64   `json:"soc,omitempty"`
+		Latitude    float64   `json:"latitude,omitempty"`
+		Charging    bool      `json:"charging,omitempty"`
+		Range       float64   `json:"range,omitempty"`
+		Speed       float64   `json:"speed,omitempty"`
+		Model       string    `json:"model,omitempty"`
+		VehicleID   string    `json:"vehicleId,omitempty"`
+		Make        string    `json:"make,omitempty"`
+		Longitude   float64   `json:"longitude,omitempty"`
+		Timestamp   time.Time `json:"timestamp,omitempty"`
+		LatestTime  time.Time
+		Start       time.Time
+	} `json:"data,omitempty"`
+	Route []tripPointinTime
+}
+
+type tripPointinTime struct {
+	Latitude  float64 `json:"latitude,omitempty"`
+	Longitude float64 `json:"longitude,omitempty"`
+	Timestamp time.Time
+	Speed     float64
+}
+
+type DataCodec struct{}
+
+type DeviceTrip struct {
+	Id         string
+	Start      time.Time
+	End        time.Time
+	LastActive time.Time
+	LastIdle   time.Time
+}
+
+type PostgresController struct {
+	db *sql.DB
+}
 
 func init() {
 	// This sets the default replication to 1. If you have more then one broker
@@ -40,258 +80,151 @@ func init() {
 		"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
 	)
 	var err error
-	db, err = sql.Open("postgres", psqlInfo)
+	pgController.db, err = sql.Open("postgres", psqlInfo)
 	if err != nil {
 		panic(err)
 	}
-	err = db.Ping()
+	err = pgController.db.Ping()
 	if err != nil {
 		panic(err)
 	}
 }
 
-type trips struct {
-	Trips       *ongoingTrips
-	GokaContext goka.Context
-}
+func (pgc *PostgresController) StoreTrip(trp DeviceTrip) error {
 
-type userTrip struct {
-	UserID         string
-	Start          time.Time
-	LatestTime     time.Time
-	AutoExpireTrip *time.Timer
-	Route          []coordinates
-	mu             *sync.Mutex
-}
-
-type coordinates struct {
-	Latitude    float64
-	Longitude   float64
-	Timestamp   time.Time
-	Speed       float64
-	Odometer    float64
-	ChargeRange float64
-}
-
-type ongoingTrips struct {
-	data  map[string]*userTrip
-	count int
-	mu    sync.Mutex
-}
-
-func (t *ongoingTrips) Get(s string) (*userTrip, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	val, ok := t.data[s]
-	return val, ok
-}
-
-func (t *ongoingTrips) Put(u *userTrip) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.data[u.UserID] = u
-}
-
-func (t *ongoingTrips) Delete(s string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	delete(t.data, s)
-
-}
-
-func (t *ongoingTrips) AutoExpire(d time.Duration, s string) error {
-	user, b := t.Get(s)
-	if b != true {
-		return fmt.Errorf("unable to get user trip for auto expire")
+	query := `INSERT INTO fulltrips (id, tripstart, tripend) VALUES ($1, $2, $3) `
+	_, err := pgc.db.Exec(query, trp.Id, trp.Start, trp.End)
+	if err != nil {
+		return err
 	}
-	user.AutoExpireTrip = time.AfterFunc(d, func() {
-		fmt.Printf("A completed trip has been logged.\n")
-		t.Delete(s)
-	})
 	return nil
 }
 
-func (t *ongoingTrips) RefreshAutoExpire(d time.Duration, s string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	user, b := t.Get(s)
-	if b != true {
-		return fmt.Errorf("unable to get user trip for refresh auto expire")
+// Encodes a trip into []byte
+func (jc *DataCodec) Encode(value interface{}) ([]byte, error) {
+	if _, istrip := value.(*Data); !istrip {
+		return nil, fmt.Errorf("Codec requires value *data, got %T", value)
 	}
-	user.AutoExpireTrip.Reset(d)
-	return nil
+	return json.Marshal(value)
 }
 
-func (t *ongoingTrips) StopAutoExpire(s string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	user, b := t.Get(s)
-	if b != true {
-		return fmt.Errorf("unable to get user trip for stop auto expire")
+// Decodes a trip from []byte to it's go representation.
+func (jc *DataCodec) Decode(data []byte) (interface{}, error) {
+	var decoded Data
+	err := json.Unmarshal(data, &decoded)
+	if err != nil {
+		return nil, fmt.Errorf("Error unmarshaling data: %v", err)
 	}
-	user.AutoExpireTrip.Stop()
-	return nil
+	return &decoded, nil
 }
 
-func (t *ongoingTrips) RefreshLatestTime(tm time.Time, s string) error {
-	user, b := t.Get(s)
-	if b != true {
-		return fmt.Errorf("unable to get user trip for refresh latest time")
+type newRecordCodec struct{}
+
+func (c *newRecordCodec) Encode(value interface{}) ([]byte, error) {
+	if _, istrip := value.(*DeviceTrip); !istrip {
+		return nil, fmt.Errorf("new record codec requires value *data, got %T", value)
 	}
-	user.LatestTime = tm
-	return nil
+	return json.Marshal(value)
 }
 
-func (t *ongoingTrips) AddCoordToRoute(coords coordinates, s string) error {
-	user, b := t.Get(s)
-	if b != true {
-		return fmt.Errorf("unable to get user trip for add coords to route")
+func (c *newRecordCodec) Decode(data []byte) (interface{}, error) {
+	var decoded DeviceTrip
+	err := json.Unmarshal(data, &decoded)
+	if err != nil {
+		return nil, fmt.Errorf("Error unmarshaling new record data: %v", err)
 	}
-	user.Route = append(user.Route, coords)
-	return nil
+	return &decoded, nil
 }
 
-// calcuate the distance between two coordinate pairs, returns KM
-func distanceBetweenCoords(lat1 float64, lng1 float64, lat2 float64, lng2 float64) float64 {
-	radlat1 := float64(math.Pi * lat1 / 180)
-	radlat2 := float64(math.Pi * lat2 / 180)
-
-	theta := float64(lng1 - lng2)
-	radtheta := float64(math.Pi * theta / 180)
-
-	dist := math.Sin(radlat1)*math.Sin(radlat2) + math.Cos(radlat1)*math.Cos(radlat2)*math.Cos(radtheta)
-	if dist > 1 {
-		dist = 1
+// Emit messages forever every second
+func runEmitter() {
+	emitter, err := goka.NewEmitter(brokers, topic, new(codec.String))
+	if err != nil {
+		log.Fatalf("error creating emitter: %v", err)
 	}
-
-	dist = math.Acos(dist)
-	dist = dist * 180 / math.Pi
-	dist = dist * 60 * 1.1515
-	return dist * 1.60934 // distance as kilometers
+	defer emitter.Finish()
+	for {
+		time.Sleep(1 * time.Second)
+		err = emitter.EmitSync("some-key", "some-value")
+		if err != nil {
+			log.Fatalf("error emitting message: %v", err)
+		}
+	}
 }
 
 // process messages until ctrl-c is pressed
-func runProcessor(trps *ongoingTrips) {
+func runProcessor() {
+	cb := func(ctx goka.Context, msg interface{}) {
 
-	// process callback is invoked for each message delivered from
-	cb := func(trps *ongoingTrips) goka.ProcessCallback {
-		return func(ctx goka.Context, msg interface{}) {
-			timeVal := strings.Replace(gjson.Get(msg.(string), "data.timestamp").Str, "Z", "", 1)
-			timeVal = strings.Replace(timeVal, "-06:00", "", 1)
-			currentSpeed := gjson.Get(msg.(string), "data.speed").Float()
-			lat := gjson.Get(msg.(string), "data.latitude").Float()
-			lon := gjson.Get(msg.(string), "data.longitude").Float()
-			odometer := gjson.Get(msg.(string), "data.odometer").Float()
-			chargeRange := gjson.Get(msg.(string), "data.range").Float()
-			userID := gjson.Get(msg.(string), "subject").Str
+		var existingRecord *DeviceTrip
+		newRecord := msg.(*Data)
 
-			var currentTime time.Time
-			var err error
-			if timeVal != "" {
-				currentTime, err = time.Parse("2006-01-02T15:04:05", timeVal)
-				if err != nil {
-					log.Fatal(err)
-					return
+		if val := ctx.Value(); val != nil {
+			existingRecord = val.(*DeviceTrip)
+
+			if newRecord.Data.Timestamp.Sub(existingRecord.LastActive).Minutes() <= 15 {
+				if newRecord.Data.Speed > 0 {
+					existingRecord.LastActive = newRecord.Data.Timestamp
+					ctx.SetValue(existingRecord)
 				}
 			} else {
-				currentTime = time.Time{}
-			}
-			// determining if a coords reading is part of an earlier trip (timestamp > 15 min but coords are significantly diff than last time)
-			coords := coordinates{Latitude: lat, Longitude: lon, Timestamp: currentTime, Speed: currentSpeed, Odometer: odometer, ChargeRange: chargeRange}
-			if val, ok := trps.data[userID]; ok {
-				if (currentTime.Sub(val.LatestTime).Minutes() < 15) && currentSpeed > 0 {
-
-					if coords.Odometer == val.Route[len(val.Route)-1].Odometer {
-						val.Route[len(val.Route)-1] = coords
-						trps.RefreshLatestTime(currentTime, val.UserID)
-					} else {
-						trps.RefreshLatestTime(currentTime, val.UserID)
-						trps.AddCoordToRoute(coords, val.UserID)
+				if existingRecord.Start != existingRecord.LastActive {
+					existingRecord.End = existingRecord.LastActive
+					err := pgController.StoreTrip(*existingRecord)
+					if err != nil {
+						log.Fatal(err)
 					}
-				} else {
-					// observedDistance := distanceBetweenCoords(val.Route[len(val.Route)-1].Longitude, val.Route[len(val.Route)-1].Latitude, coords.Longitude, coords.Longitude)
-					// traveledDistance := coords.Odometer - val.Route[len(val.Route)-1].Odometer
-
-					if len(val.Route) > 1 {
-						if trps.count < 3 {
-							fmt.Println("\n\nUser: ", userID, "\nTrip Completed: ", val.Route)
-						}
-						for n := 0; n < len(val.Route); n++ {
-
-							geometry := fmt.Sprintf("POINT(%f %f)", val.Route[n].Longitude, val.Route[n].Latitude)
-							if val.Route[n].Longitude != 0.0 && val.Route[n].Latitude != 0.0 {
-								query := `INSERT INTO points_gaps (devicekey, geom, pointnum, coord_timestamp, speed, odometer, chargeRange, tripid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-								_, err := db.Exec(query, userID, geometry, n, val.Route[n].Timestamp, val.Route[n].Speed, val.Route[n].Odometer, val.Route[n].ChargeRange, trps.count)
-								if err != nil {
-									fmt.Println(err)
-								}
-							}
-						}
-						trps.count++
-						trps.Delete(val.UserID)
-
-						if currentSpeed > 0 {
-							newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: userID, Route: []coordinates{coords}}
-							trps.Put(&newTrip)
-							trps.AutoExpire(time.Minute*10, newTrip.UserID)
-						}
-					}
-
+					ctx.Delete()
 				}
-
-			} else {
-				if currentSpeed > 0 {
-					newTrip := userTrip{Start: currentTime, LatestTime: currentTime, UserID: userID, Route: []coordinates{coords}}
-					trps.Put(&newTrip)
-					trps.AutoExpire(time.Minute*10, newTrip.UserID)
+				if newRecord.Data.Speed > 0 {
+					beginTrip := new(DeviceTrip)
+					beginTrip.Id = ctx.Key()
+					beginTrip.Start = newRecord.Data.Timestamp.UTC()
+					beginTrip.LastActive = beginTrip.Start
+					ctx.SetValue(beginTrip)
 				}
 			}
 
+		} else {
+			beginTrip := new(DeviceTrip)
+			beginTrip.Id = ctx.Key()
+			beginTrip.Start = newRecord.Data.Timestamp.UTC()
+			beginTrip.LastActive = beginTrip.Start
+			ctx.SetValue(beginTrip)
 		}
 	}
 
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
-		goka.Input(topic, new(codec.String), cb(trps)),
-		goka.Persist(new(codec.Int64)),
+		goka.Input(topic, new(DataCodec), cb),
+		goka.Persist(new(newRecordCodec)),
 	)
 
-	p, err := goka.NewProcessor(brokers,
-		g,
-		goka.WithTopicManagerBuilder(goka.TopicManagerBuilderWithTopicManagerConfig(tmc)),
-		goka.WithConsumerGroupBuilder(goka.DefaultConsumerGroupBuilder),
-	)
+	p, err := goka.NewProcessor(brokers, g,
+		goka.WithConsumerGroupBuilder(goka.DefaultConsumerGroupBuilder))
 	if err != nil {
 		log.Fatalf("error creating processor: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
+	done := make(chan bool)
 	go func() {
 		defer close(done)
 		if err = p.Run(ctx); err != nil {
-			log.Printf("error running processor: %v", err)
+			log.Fatalf("error running processor: %v", err)
+		} else {
+			log.Printf("Processor shutdown cleanly")
 		}
 	}()
 
-	sigs := make(chan os.Signal)
-	go func() {
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
-	}()
-
-	select {
-	case <-sigs:
-	case <-done:
-	}
-	cancel()
+	wait := make(chan os.Signal, 1)
+	signal.Notify(wait, syscall.SIGINT, syscall.SIGTERM)
+	<-wait   // wait for SIGINT/SIGTERM
+	cancel() // gracefully stop processor
 	<-done
 }
 
 func main() {
-	config := goka.DefaultConfig()
-	config.Consumer.Offsets.Initial = sarama.OffsetOldest // read all messages starting with oldest
-	goka.ReplaceGlobalConfig(config)
-
 	tm, err := goka.NewTopicManager(brokers, goka.DefaultConfig(), tmc)
 	if err != nil {
 		log.Fatalf("Error creating topic manager: %v", err)
@@ -302,6 +235,5 @@ func main() {
 		log.Printf("Error creating kafka topic %s: %v", topic, err)
 	}
 
-	uTrips := ongoingTrips{data: make(map[string]*userTrip)}
-	runProcessor(&uTrips)
+	runProcessor() // press ctrl-c to stop
 }
