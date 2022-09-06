@@ -1,3 +1,4 @@
 # dont push data
 *.json
 postgres-data/
+.env

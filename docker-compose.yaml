@@ -1,34 +1,40 @@
-version: "3.8"
+version: "3.9"
 
 services:
-
-  zookeeper:
+  postgis:
+    image: kartoza/postgis
     networks:
-      - goka_network
-    image: confluentinc/cp-zookeeper:6.2.5
-    container_name: trips-api-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-
-  kafka:
-    networks:
-      - goka_network
-    image: confluentinc/cp-kafka:6.2.5
-    container_name: trips-api-kafka
-    depends_on:
-    - zookeeper
-    environment:
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_INTERNAL://broker:29092'
-
-  api:
-    build: ./ideation/api
-    networks:
-      - goka_network
+      - trips-net
     ports:
-      - 8000:8000
+      - 5433:5432
+    environment:
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/
+    # restart: on-failure
+    env_file: 
+        - ./.env
 
-  networks:
-      goka_network:
-          driver: bridge
+  pg_tileserv:
+    image: pramsey/pg_tileserv:latest-alpine-3.12
+    networks:
+      - trips-net
+    build:
+      context: ./internal/maps/pg_tileserv
+      dockerfile: Dockerfile
+      args:
+        VERSION: latest-alpine-3.12
+    container_name: pg_tileserv
+    env_file:
+      - ./.env
+    depends_on:
+      - postgis
+    ports:
+      - 7800:7800
+    
+networks:
+  trips-net:
+    driver: bridge
+
+volumes:
+  postgis_data:
