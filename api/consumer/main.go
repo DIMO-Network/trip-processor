@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+	"trips-api/api/internal/config"
 
 	"github.com/DIMO-Network/shared"
 	_ "github.com/lib/pq"
@@ -15,14 +17,13 @@ import (
 )
 
 var (
-	brokers             = []string{"localhost:9092"}
-	topic   goka.Stream = "topic.device.status"
-	group   goka.Group  = "mini-group"
-	event   goka.Stream = "topic.device.trip.event"
+	brokers               = []string{"localhost:9092"}
+	topic     goka.Stream = "topic.device.status"
+	group     goka.Group  = "mini-group"
+	completed goka.Stream = "topic.device.trip.completed.event"
+	start     goka.Stream = "topic.device.trip.start.event"
 
 	tmc *goka.TopicManagerConfig
-
-	pgController PostgresController
 )
 
 type Data struct {
@@ -43,7 +44,6 @@ type Data struct {
 		LatestTime  time.Time
 		Start       time.Time
 	} `json:"data,omitempty"`
-	Route []tripPointinTime
 }
 
 type tripPointinTime struct {
@@ -61,12 +61,20 @@ type DeviceTrip struct {
 	LastIdle   time.Time
 }
 
-type PostgresController struct {
-	db *sql.DB
-}
-
 type TripProcessor struct {
 	logger *zerolog.Logger
+	db     *sql.DB
+}
+
+type TripStartEvent struct {
+	Id    string
+	Start time.Time
+}
+
+type TripCompletedEvent struct {
+	Id    string
+	Start time.Time
+	End   time.Time
 }
 
 func init() {
@@ -75,25 +83,12 @@ func init() {
 	tmc = goka.NewTopicManagerConfig()
 	tmc.Table.Replication = 1
 	tmc.Stream.Replication = 1
-
-	// psqlInfo := fmt.Sprintf(
-	// 	"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
-	// )
-	// var err error
-	// pgController.db, err = sql.Open("postgres", psqlInfo)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// err = pgController.db.Ping()
-	// if err != nil {
-	// 	panic(err)
-	// }
 }
 
-func (pgc *PostgresController) StoreTrip(trp DeviceTrip) error {
+func (processor *TripProcessor) StoreTrip(trp TripCompletedEvent) error {
 
 	query := `INSERT INTO fulltrips (id, tripstart, tripend) VALUES ($1, $2, $3) `
-	_, err := pgc.db.Exec(query, trp.Id, trp.Start, trp.End)
+	_, err := processor.db.Exec(query, trp.Id, trp.Start, trp.End)
 	if err != nil {
 		return err
 	}
@@ -102,6 +97,8 @@ func (pgc *PostgresController) StoreTrip(trp DeviceTrip) error {
 
 var deviceStatusCodec = &shared.JSONCodec[Data]{}
 var tripStateCodec = &shared.JSONCodec[DeviceTrip]{}
+var tripStartCodec = &shared.JSONCodec[TripStartEvent]{}
+var tripCompletedCodec = &shared.JSONCodec[TripCompletedEvent]{}
 
 const TripGracePeriod = 15 * time.Minute
 
@@ -123,7 +120,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			// Trying to squash trips consisting of one data point.
 			if existingTrip.Start != existingTrip.LastActive {
 				existingTrip.End = existingTrip.LastActive
-				ctx.Emit(event, ctx.Key(), existingTrip)
+				ctx.Emit(completed, ctx.Key(), TripCompletedEvent{Id: ctx.Key(), Start: existingTrip.Start, End: existingTrip.End})
 				ctx.Delete()
 			}
 			if newDeviceStatus.Data.Speed > 0 {
@@ -134,7 +131,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 					LastActive: ts,
 				}
 				ctx.SetValue(beginTrip)
-				// TODO: Emit trip start event.
+				ctx.Emit(start, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
 			}
 		}
 
@@ -146,7 +143,18 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			LastActive: ts,
 		}
 		ctx.SetValue(beginTrip)
+		ctx.Emit(start, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
 	}
+}
+
+func (processor *TripProcessor) listenForCompletedTrips(ctx goka.Context, msg any) {
+
+	completedTrip := msg.(*TripCompletedEvent)
+	err := processor.StoreTrip(*completedTrip)
+	if err != nil {
+		processor.logger.Err(err)
+	}
+
 }
 
 // process messages until ctrl-c is pressed
@@ -155,8 +163,10 @@ func (tp *TripProcessor) runProcessor() {
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
 		goka.Input(topic, deviceStatusCodec, tp.processDeviceStatus),
+		goka.Input(completed, tripCompletedCodec, tp.listenForCompletedTrips),
 		goka.Persist(tripStateCodec),
-		goka.Output(event, tripStateCodec),
+		goka.Output(completed, tripCompletedCodec),
+		goka.Output(start, tripStartCodec),
 	)
 
 	p, err := goka.NewProcessor(brokers, g,
@@ -185,6 +195,28 @@ func (tp *TripProcessor) runProcessor() {
 func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Str("app", "trip-processor").Logger()
 
-	tp := &TripProcessor{logger: &logger}
+	settings, err := shared.LoadConfig[config.Settings]("settings.yaml")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("could not load settings")
+	}
+	psqlInfo := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		settings.DBHost,
+		settings.DBPort,
+		settings.DBUser,
+		settings.DBPassword,
+		settings.DBName,
+	)
+
+	db, err := sql.Open("postgres", psqlInfo)
+	if err != nil {
+		panic(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+
+	tp := &TripProcessor{logger: &logger, db: db}
 	tp.runProcessor() // press ctrl-c to stop
 }

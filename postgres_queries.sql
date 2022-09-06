@@ -3,6 +3,7 @@ CREATE TABLE points_gaps (devicekey varchar, geom geometry, pointnum varchar, co
 
 CREATE TABLE fulltrips (id varchar, tripstart varchar, tripend varchar);
 TRUNCATE fulltrips
+SELECT * FROM fulltrips
 
 ALTER TABLE points_gaps
   ALTER COLUMN geom TYPE geometry(POINT, 4326)

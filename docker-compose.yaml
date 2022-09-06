@@ -9,11 +9,11 @@ services:
       - 5433:5432
     environment:
       - ALLOW_IP_RANGE=0.0.0.0/0
+      - POSTGRES_PASS=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DBNAME=pg_db
     volumes:
       - ./postgres-data:/var/lib/postgresql/
-    # restart: on-failure
-    env_file: 
-        - ./.env
 
   pg_tileserv:
     image: pramsey/pg_tileserv:latest-alpine-3.12
@@ -25,8 +25,12 @@ services:
       args:
         VERSION: latest-alpine-3.12
     container_name: pg_tileserv
-    env_file:
-      - ./.env
+    environment:
+      - DB_HOST=postgis
+      - POSTGRES_PASS=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DBNAME=pg_db
+      - DATABASE_URL=postgres://postgres:postgres@postgis/pg_db
     depends_on:
       - postgis
     ports:
