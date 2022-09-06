@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +11,7 @@ import (
 	"github.com/DIMO-Network/shared"
 	_ "github.com/lib/pq"
 	"github.com/lovoo/goka"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -66,7 +66,7 @@ type PostgresController struct {
 }
 
 type TripProcessor struct {
-	Emitter *goka.Emitter
+	logger *zerolog.Logger
 }
 
 func init() {
@@ -123,7 +123,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			// Trying to squash trips consisting of one data point.
 			if existingTrip.Start != existingTrip.LastActive {
 				existingTrip.End = existingTrip.LastActive
-				processor.Emitter.Emit(ctx.Key(), existingTrip)
+				ctx.Emit(event, ctx.Key(), existingTrip)
 				ctx.Delete()
 			}
 			if newDeviceStatus.Data.Speed > 0 {
@@ -150,27 +150,28 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 }
 
 // process messages until ctrl-c is pressed
-func (processor *TripProcessor) runProcessor() {
+func (tp *TripProcessor) runProcessor() {
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
-		goka.Input(topic, deviceStatusCodec, processor.processDeviceStatus),
+		goka.Input(topic, deviceStatusCodec, tp.processDeviceStatus),
 		goka.Persist(tripStateCodec),
+		goka.Output(event, tripStateCodec),
 	)
 
 	p, err := goka.NewProcessor(brokers, g,
 		goka.WithConsumerGroupBuilder(goka.DefaultConsumerGroupBuilder))
 	if err != nil {
-		log.Fatalf("error creating processor: %v", err)
+		tp.logger.Fatal().Err(err).Msg("Failed to create processor.")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool)
 	go func() {
 		defer close(done)
 		if err = p.Run(ctx); err != nil {
-			log.Fatalf("error running processor: %v", err)
+			tp.logger.Fatal().Err(err).Msg("Processor terminated with an error.")
 		} else {
-			log.Printf("Processor shutdown cleanly")
+			tp.logger.Info().Msg("Processor shut down cleanly.")
 		}
 	}()
 
@@ -182,22 +183,8 @@ func (processor *TripProcessor) runProcessor() {
 }
 
 func main() {
-	tm, err := goka.NewTopicManager(brokers, goka.DefaultConfig(), tmc)
-	if err != nil {
-		log.Fatalf("Error creating topic manager: %v", err)
-	}
-	defer tm.Close()
-	err = tm.EnsureStreamExists(string(topic), 8)
-	if err != nil {
-		log.Printf("Error creating kafka topic %s: %v", topic, err)
-	}
+	logger := zerolog.New(os.Stdout).With().Timestamp().Str("app", "trip-processor").Logger()
 
-	emitter, err := goka.NewEmitter(brokers, event, tripStateCodec)
-	if err != nil {
-		log.Fatalf("error creating emitter: %v", err)
-	}
-	defer emitter.Finish()
-
-	tp := TripProcessor{Emitter: emitter}
+	tp := &TripProcessor{logger: &logger}
 	tp.runProcessor() // press ctrl-c to stop
 }

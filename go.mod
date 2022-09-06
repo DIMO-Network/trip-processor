@@ -7,6 +7,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.36.0
 	github.com/lib/pq v1.10.6
 	github.com/lovoo/goka v1.1.7
+	github.com/rs/zerolog v1.28.0
 )
 
 require (
@@ -34,6 +35,8 @@ require (
 	github.com/jcmturner/gokrb5/v8 v8.4.2 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/klauspost/compress v1.15.6 // indirect
+	github.com/mattn/go-colorable v0.1.12 // indirect
+	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/pierrec/lz4/v4 v4.1.14 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
