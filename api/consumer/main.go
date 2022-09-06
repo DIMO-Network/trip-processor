@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -19,6 +18,7 @@ var (
 	brokers             = []string{"localhost:9092"}
 	topic   goka.Stream = "topic.device.status"
 	group   goka.Group  = "mini-group"
+	event   goka.Stream = "topic.device.trip.event"
 
 	tmc *goka.TopicManagerConfig
 
@@ -65,6 +65,10 @@ type PostgresController struct {
 	db *sql.DB
 }
 
+type TripProcessor struct {
+	Emitter *goka.Emitter
+}
+
 func init() {
 	// This sets the default replication to 1. If you have more then one broker
 	// the default configuration can be used.
@@ -72,18 +76,18 @@ func init() {
 	tmc.Table.Replication = 1
 	tmc.Stream.Replication = 1
 
-	psqlInfo := fmt.Sprintf(
-		"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
-	)
-	var err error
-	pgController.db, err = sql.Open("postgres", psqlInfo)
-	if err != nil {
-		panic(err)
-	}
-	err = pgController.db.Ping()
-	if err != nil {
-		panic(err)
-	}
+	// psqlInfo := fmt.Sprintf(
+	// 	"host=localhost port=5433 user=postgres password=postgres dbname=pg_db sslmode=disable",
+	// )
+	// var err error
+	// pgController.db, err = sql.Open("postgres", psqlInfo)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// err = pgController.db.Ping()
+	// if err != nil {
+	// 	panic(err)
+	// }
 }
 
 func (pgc *PostgresController) StoreTrip(trp DeviceTrip) error {
@@ -99,25 +103,9 @@ func (pgc *PostgresController) StoreTrip(trp DeviceTrip) error {
 var deviceStatusCodec = &shared.JSONCodec[Data]{}
 var tripStateCodec = &shared.JSONCodec[DeviceTrip]{}
 
-// Emit messages forever every second
-// func runEmitter() {
-// 	emitter, err := goka.NewEmitter(brokers, topic, new(codec.String))
-// 	if err != nil {
-// 		log.Fatalf("error creating emitter: %v", err)
-// 	}
-// 	defer emitter.Finish()
-// 	for {
-// 		time.Sleep(1 * time.Second)
-// 		err = emitter.EmitSync("some-key", "some-value")
-// 		if err != nil {
-// 			log.Fatalf("error emitting message: %v", err)
-// 		}
-// 	}
-// }
-
 const TripGracePeriod = 15 * time.Minute
 
-func processDeviceStatus(ctx goka.Context, msg any) {
+func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 	var existingTrip *DeviceTrip
 	newDeviceStatus := msg.(*Data)
 
@@ -135,11 +123,7 @@ func processDeviceStatus(ctx goka.Context, msg any) {
 			// Trying to squash trips consisting of one data point.
 			if existingTrip.Start != existingTrip.LastActive {
 				existingTrip.End = existingTrip.LastActive
-				// TODO: Emit trip end event.
-				err := pgController.StoreTrip(*existingTrip)
-				if err != nil {
-					log.Fatal(err)
-				}
+				processor.Emitter.Emit(ctx.Key(), existingTrip)
 				ctx.Delete()
 			}
 			if newDeviceStatus.Data.Speed > 0 {
@@ -166,11 +150,11 @@ func processDeviceStatus(ctx goka.Context, msg any) {
 }
 
 // process messages until ctrl-c is pressed
-func runProcessor() {
+func (processor *TripProcessor) runProcessor() {
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
-		goka.Input(topic, deviceStatusCodec, processDeviceStatus),
+		goka.Input(topic, deviceStatusCodec, processor.processDeviceStatus),
 		goka.Persist(tripStateCodec),
 	)
 
@@ -208,5 +192,12 @@ func main() {
 		log.Printf("Error creating kafka topic %s: %v", topic, err)
 	}
 
-	runProcessor() // press ctrl-c to stop
+	emitter, err := goka.NewEmitter(brokers, event, tripStateCodec)
+	if err != nil {
+		log.Fatalf("error creating emitter: %v", err)
+	}
+	defer emitter.Finish()
+
+	tp := TripProcessor{Emitter: emitter}
+	tp.runProcessor() // press ctrl-c to stop
 }
