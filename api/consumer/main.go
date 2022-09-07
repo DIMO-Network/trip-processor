@@ -80,11 +80,11 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			// Grace period for the existing trip has passed, so need to end it before
 			// doing anything else.
 			// Trying to squash trips consisting of one data point.
-			if existingTrip.Start != existingTrip.LastActive {
-				existingTrip.End = existingTrip.LastActive
-				ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: existingTrip.Start, End: existingTrip.End})
-				ctx.Delete()
-			}
+			// if existingTrip.Start != existingTrip.LastActive {
+			existingTrip.End = existingTrip.LastActive
+			ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: existingTrip.Start, End: existingTrip.End})
+			ctx.Delete()
+			// }
 			if newDeviceStatus.Data.Speed > 0 {
 				ts := newDeviceStatus.Data.Timestamp.UTC()
 				beginTrip := &DeviceTrip{
