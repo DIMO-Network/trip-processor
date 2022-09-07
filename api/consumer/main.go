@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+	"trips-api/api/internal/config"
 
 	"github.com/DIMO-Network/shared"
 	"github.com/lovoo/goka"
@@ -13,7 +15,6 @@ import (
 )
 
 var (
-	brokers                = []string{"localhost:9092"}
 	topic      goka.Stream = "topic.device.status"
 	group      goka.Group  = "trip-processor"
 	tripstatus goka.Stream = "topic.device.trip.event"
@@ -109,7 +110,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 }
 
 // process messages until ctrl-c is pressed
-func (tp *TripProcessor) runProcessor() {
+func (tp *TripProcessor) runProcessor(brokers []string) {
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
@@ -143,6 +144,13 @@ func (tp *TripProcessor) runProcessor() {
 func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Str("app", "trip-processor").Logger()
 
+	settings, err := shared.LoadConfig[config.Settings]("settings.yaml")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed loading settings.")
+	}
+	logger.Info().Interface("settings", settings).Msg("Settings loaded.")
+
 	tp := &TripProcessor{logger: &logger}
-	tp.runProcessor() // press ctrl-c to stop
+	brokers := strings.Split(settings.KafkaBrokers, ",")
+	tp.runProcessor(brokers) // press ctrl-c to stop
 }

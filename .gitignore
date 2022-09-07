@@ -2,3 +2,4 @@
 *.json
 postgres-data/
 .env
+/settings.yaml
