@@ -2,16 +2,12 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"trips-api/api/internal/config"
 
 	"github.com/DIMO-Network/shared"
-	_ "github.com/lib/pq"
 	"github.com/lovoo/goka"
 	"github.com/rs/zerolog"
 )
@@ -19,10 +15,8 @@ import (
 var (
 	brokers                = []string{"localhost:9092"}
 	topic      goka.Stream = "topic.device.status"
-	group      goka.Group  = "mini-group"
+	group      goka.Group  = "trip-processor"
 	tripstatus goka.Stream = "topic.device.trip.event"
-
-	tmc *goka.TopicManagerConfig
 )
 
 type Data struct {
@@ -45,13 +39,6 @@ type Data struct {
 	} `json:"data,omitempty"`
 }
 
-type tripPointinTime struct {
-	Latitude  float64 `json:"latitude,omitempty"`
-	Longitude float64 `json:"longitude,omitempty"`
-	Timestamp time.Time
-	Speed     float64
-}
-
 type DeviceTrip struct {
 	Id         string
 	Start      time.Time
@@ -61,9 +48,7 @@ type DeviceTrip struct {
 }
 
 type TripProcessor struct {
-	logger    *zerolog.Logger
-	db        *sql.DB
-	TripCount int
+	logger *zerolog.Logger
 }
 
 type TripStartEvent struct {
@@ -75,27 +60,6 @@ type TripStatus struct {
 	DeviceID string
 	Start    time.Time
 	End      time.Time
-}
-
-func init() {
-	// This sets the default replication to 1. If you have more then one broker
-	// the default configuration can be used.
-	tmc = goka.NewTopicManagerConfig()
-	tmc.Table.Replication = 1
-	tmc.Stream.Replication = 1
-}
-
-func (processor *TripProcessor) StoreTrip(trp TripStatus) error {
-
-	if !trp.End.IsZero() {
-		query := `INSERT INTO fulltrips (deviceid, tripstart, tripend, tripid) VALUES ($1, $2, $3, $4) `
-		_, err := processor.db.Exec(query, trp.DeviceID, trp.Start, trp.End, processor.TripCount)
-		if err != nil {
-			return err
-		}
-		processor.TripCount++
-	}
-	return nil
 }
 
 var deviceStatusCodec = &shared.JSONCodec[Data]{}
@@ -149,29 +113,17 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 	}
 }
 
-func (processor *TripProcessor) listenForCompletedTrips(ctx goka.Context, msg any) {
-
-	completedTrip := msg.(*TripStatus)
-	err := processor.StoreTrip(*completedTrip)
-	if err != nil {
-		processor.logger.Err(err)
-	}
-
-}
-
 // process messages until ctrl-c is pressed
 func (tp *TripProcessor) runProcessor() {
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
 		goka.Input(topic, deviceStatusCodec, tp.processDeviceStatus),
-		goka.Input(tripstatus, tripStatusCodec, tp.listenForCompletedTrips),
 		goka.Persist(tripStateCodec),
 		goka.Output(tripstatus, tripStatusCodec),
 	)
 
-	p, err := goka.NewProcessor(brokers, g,
-		goka.WithConsumerGroupBuilder(goka.DefaultConsumerGroupBuilder))
+	p, err := goka.NewProcessor(brokers, g)
 	if err != nil {
 		tp.logger.Fatal().Err(err).Msg("Failed to create processor.")
 	}
@@ -196,28 +148,6 @@ func (tp *TripProcessor) runProcessor() {
 func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Str("app", "trip-processor").Logger()
 
-	settings, err := shared.LoadConfig[config.Settings]("settings.yaml")
-	if err != nil {
-		logger.Fatal().Err(err).Msg("could not load settings")
-	}
-	psqlInfo := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		settings.DBHost,
-		settings.DBPort,
-		settings.DBUser,
-		settings.DBPassword,
-		settings.DBName,
-	)
-
-	db, err := sql.Open("postgres", psqlInfo)
-	if err != nil {
-		panic(err)
-	}
-	err = db.Ping()
-	if err != nil {
-		panic(err)
-	}
-
-	tp := &TripProcessor{logger: &logger, db: db}
+	tp := &TripProcessor{logger: &logger}
 	tp.runProcessor() // press ctrl-c to stop
 }
