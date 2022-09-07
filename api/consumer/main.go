@@ -17,11 +17,10 @@ import (
 )
 
 var (
-	brokers               = []string{"localhost:9092"}
-	topic     goka.Stream = "topic.device.status"
-	group     goka.Group  = "mini-group"
-	completed goka.Stream = "topic.device.trip.completed.event"
-	start     goka.Stream = "topic.device.trip.start.event"
+	brokers                = []string{"localhost:9092"}
+	topic      goka.Stream = "topic.device.status"
+	group      goka.Group  = "mini-group"
+	tripstatus goka.Stream = "topic.device.trip.event"
 
 	tmc *goka.TopicManagerConfig
 )
@@ -62,8 +61,9 @@ type DeviceTrip struct {
 }
 
 type TripProcessor struct {
-	logger *zerolog.Logger
-	db     *sql.DB
+	logger    *zerolog.Logger
+	db        *sql.DB
+	TripCount int
 }
 
 type TripStartEvent struct {
@@ -71,10 +71,10 @@ type TripStartEvent struct {
 	Start time.Time
 }
 
-type TripCompletedEvent struct {
-	Id    string
-	Start time.Time
-	End   time.Time
+type TripStatus struct {
+	DeviceID string
+	Start    time.Time
+	End      time.Time
 }
 
 func init() {
@@ -85,20 +85,22 @@ func init() {
 	tmc.Stream.Replication = 1
 }
 
-func (processor *TripProcessor) StoreTrip(trp TripCompletedEvent) error {
+func (processor *TripProcessor) StoreTrip(trp TripStatus) error {
 
-	query := `INSERT INTO fulltrips (id, tripstart, tripend) VALUES ($1, $2, $3) `
-	_, err := processor.db.Exec(query, trp.Id, trp.Start, trp.End)
-	if err != nil {
-		return err
+	if !trp.End.IsZero() {
+		query := `INSERT INTO fulltrips (deviceid, tripstart, tripend, tripid) VALUES ($1, $2, $3, $4) `
+		_, err := processor.db.Exec(query, trp.DeviceID, trp.Start, trp.End, processor.TripCount)
+		if err != nil {
+			return err
+		}
+		processor.TripCount++
 	}
 	return nil
 }
 
 var deviceStatusCodec = &shared.JSONCodec[Data]{}
 var tripStateCodec = &shared.JSONCodec[DeviceTrip]{}
-var tripStartCodec = &shared.JSONCodec[TripStartEvent]{}
-var tripCompletedCodec = &shared.JSONCodec[TripCompletedEvent]{}
+var tripStatusCodec = &shared.JSONCodec[TripStatus]{}
 
 const TripGracePeriod = 15 * time.Minute
 
@@ -120,7 +122,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			// Trying to squash trips consisting of one data point.
 			if existingTrip.Start != existingTrip.LastActive {
 				existingTrip.End = existingTrip.LastActive
-				ctx.Emit(completed, ctx.Key(), TripCompletedEvent{Id: ctx.Key(), Start: existingTrip.Start, End: existingTrip.End})
+				ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: existingTrip.Start, End: existingTrip.End})
 				ctx.Delete()
 			}
 			if newDeviceStatus.Data.Speed > 0 {
@@ -131,7 +133,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 					LastActive: ts,
 				}
 				ctx.SetValue(beginTrip)
-				ctx.Emit(start, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
+				ctx.Emit(tripstatus, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
 			}
 		}
 
@@ -143,13 +145,13 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			LastActive: ts,
 		}
 		ctx.SetValue(beginTrip)
-		ctx.Emit(start, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
+		ctx.Emit(tripstatus, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
 	}
 }
 
 func (processor *TripProcessor) listenForCompletedTrips(ctx goka.Context, msg any) {
 
-	completedTrip := msg.(*TripCompletedEvent)
+	completedTrip := msg.(*TripStatus)
 	err := processor.StoreTrip(*completedTrip)
 	if err != nil {
 		processor.logger.Err(err)
@@ -163,10 +165,9 @@ func (tp *TripProcessor) runProcessor() {
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
 		goka.Input(topic, deviceStatusCodec, tp.processDeviceStatus),
-		goka.Input(completed, tripCompletedCodec, tp.listenForCompletedTrips),
+		goka.Input(tripstatus, tripStatusCodec, tp.listenForCompletedTrips),
 		goka.Persist(tripStateCodec),
-		goka.Output(completed, tripCompletedCodec),
-		goka.Output(start, tripStartCodec),
+		goka.Output(tripstatus, tripStatusCodec),
 	)
 
 	p, err := goka.NewProcessor(brokers, g,
