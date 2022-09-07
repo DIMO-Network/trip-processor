@@ -51,11 +51,6 @@ type TripProcessor struct {
 	logger *zerolog.Logger
 }
 
-type TripStartEvent struct {
-	Id    string
-	Start time.Time
-}
-
 type TripStatus struct {
 	DeviceID string
 	Start    time.Time
@@ -97,7 +92,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 					LastActive: ts,
 				}
 				ctx.SetValue(beginTrip)
-				ctx.Emit(tripstatus, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
+				ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: ts})
 			}
 		}
 
@@ -109,7 +104,7 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			LastActive: ts,
 		}
 		ctx.SetValue(beginTrip)
-		ctx.Emit(tripstatus, ctx.Key(), TripStartEvent{Id: ctx.Key(), Start: ts})
+		ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: ts})
 	}
 }
 

@@ -1,15 +1,17 @@
 
 CREATE TABLE points_gaps (devicekey varchar, geom geometry, pointnum varchar, coord_timestamp varchar, speed float, odometer float, chargeRange float, tripid int);
 
-CREATE TABLE fulltrips (id varchar, tripstart varchar, tripend varchar);
+CREATE TABLE fulltrips (deviceid varchar, tripstart timestamp, tripend timestamp, tripid varchar);
+
 TRUNCATE fulltrips
-SELECT * FROM fulltrips
+
+SELECT *, EXTRACT(EPOCH FROM (tripend - tripstart))/60 AS triplength FROM fulltrips
 
 ALTER TABLE points_gaps
   ALTER COLUMN geom TYPE geometry(POINT, 4326)
     USING ST_SetSRID(geom,4326);
 
-DROP TABLE trips_fullday
+DROP TABLE fulltrips
 
  ALTER TABLE trips_odometer RENAME TO points_odometer;
 
