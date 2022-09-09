@@ -2,6 +2,8 @@ import "./App.css";
 import ReactMapboxGl, { Layer } from "react-mapbox-gl";
 import React, { useEffect, useState } from "react";
 import { json } from "stream/consumers";
+import * as dotenv from "dotenv";
+require("dotenv").config();
 
 const MapBox = ReactMapboxGl({
   accessToken:
@@ -23,6 +25,13 @@ interface DeviceInfo {
   chargeRange: number;
 }
 
+interface DeviceTrips {
+  trip_id: string;
+  device_id: string;
+  trip_start: string;
+  trip_end: string;
+}
+
 interface DeviceMetaData {
   lat: number;
   lon: number;
@@ -37,8 +46,14 @@ interface Coordinates {
 }
 
 function App() {
-  const [deviceIDs, setDeviceIDs] = useState<DeviceMetaData[]>([]);
-  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo[]>([]);
+  const [deviceIDs, setDeviceIDs] = useState<string[]>([]);
+  // const [deviceInfo, setDeviceInfo] = useState<DeviceInfo[]>([]);
+  const [deviceTripInfo, setDeviceTripInfo] = useState<DeviceTrips[]>(
+    {} as DeviceTrips[],
+  );
+  const [allDeviceTrips, setAllDeviceTrips] = useState<DeviceTrips[]>(
+    {} as DeviceTrips[],
+  );
   const [mapCenter, setMapCenter] = useState<Coordinates>({} as Coordinates);
   const [selectedDevice, setSelectedDevice] = useState("");
   const [mapkey, setMapKey] = useState(0);
@@ -68,17 +83,51 @@ function App() {
   }, [selectedDevice]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/alldevices")
+    fetch("http://localhost:8000/devices/all")
       .then((r) => r.json())
-      .then((data) => setDeviceIDs(data as []))
+      .then((data) => setDeviceIDs(data.sort() as []))
       .catch((e) => console.error(e));
   }, []);
 
+  // useEffect(() => {
+  //   if (selectedDevice !== "") {
+  //     fetch(`http://localhost:8000/odometertrip/${selectedDevice}`)
+  //       .then((r) => r.json())
+  //       .then((data) => setDeviceInfo(data as []))
+  //       .catch((e) => console.error(e));
+  //   }
+  // }, [selectedDevice]);
+
   useEffect(() => {
     if (selectedDevice !== "") {
-      fetch(`http://localhost:8000/odometertrip/${selectedDevice}`)
-        .then((r) => r.json())
-        .then((data) => setDeviceInfo(data as []))
+      fetch(`http://localhost:8000/devices/${selectedDevice}/ongoing`, {
+        method: "GET",
+        headers: new Headers({
+          Authorization: "Bearer " + process.env.AUTH_TOKEN,
+        }),
+      })
+        .then((r) => {
+          return r.json();
+        })
+        .then((data) => setDeviceTripInfo(data))
+        .catch((e) => console.error(e));
+    }
+  }, [selectedDevice]);
+
+  useEffect(() => {
+    if (selectedDevice !== "") {
+      fetch(`http://localhost:8000/devices/${selectedDevice}/alltrips`, {
+        method: "GET",
+        headers: new Headers({
+          Authorization:
+            "Bearer " +
+            "eyJhbGciOiJSUzI1NiIsImtpZCI6IjU1ZDhlMDU2MzBmMmI1OGFhMjQzNTVlOTM2OWE1OGQ3NzU3MjFmMzMifQ.eyJpc3MiOiJodHRwOi8vMTI3LjAuMC4xOjU1NTYvZGV4IiwicHJvdmlkZXJfaWQiOiJtb2NrIiwic3ViIjoiQ2cwd0xUTTROUzB5T0RBNE9TMHdFZ1J0YjJOciIsImF1ZCI6ImV4YW1wbGUtYXBwIiwiZXhwIjoxNjYyNzk4NTk1LCJpYXQiOjE2NjI3NTUzOTUsImF0X2hhc2giOiJ2OWhrVkwtLUR6cHRaZndJUXFuWkVRIiwiY19oYXNoIjoiR2VYNzN3Nk9PRC0tb1JVejcwcGlvUSIsImVtYWlsIjoia2lsZ29yZUBraWxnb3JlLnRyb3V0IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJLaWxnb3JlIFRyb3V0In0.syvb9LQdfYoTwRXmlfp8siokzu5pt6QTNgXWfxJV8AyvLNhp7flbMe0NXioPlOOtJv4m-rZdU6cx3wDqk0h3RGCJR-GHABJfjF7djiFNI14Hk_Ox2wceQxUYpiXkhGDLYANfBBy-atDTlwdHtar2Vz-zyBogvwcoL-tB9toXZCxbLulmzLfPDndTsHFOoOzPiLul1Xn_OGdX2rxASyXb99Ed0heGk3kJ1jicEqhDEA8cBGGvxq-7k04WlVLtXZTv-VhCbRud4cfnfef8-3eS8kkRYiyPnNLIVTq8-b0qeyRVXUkB_hdY_ewuN_ke9IyncL-nKWKS8DyO3Od74d8cVQ",
+        }),
+      })
+        .then((r) => {
+          return r.json();
+        })
+        .then((data) => setAllDeviceTrips(data))
         .catch((e) => console.error(e));
     }
   }, [selectedDevice]);
@@ -199,30 +248,30 @@ function App() {
               id="DeviceIDs"
               value={selectedDevice}
               onChange={(e) => {
-                const data = JSON.parse(e.target.value) as DeviceMetaData;
-                setMapCenter({ lat: data.lat, lon: data.lon, zoom: 10 });
-                setSelectedDevice(data.deviceID);
+                const data = JSON.parse(e.target.value) as string;
+                // setMapCenter({ lat: data.lat, lon: data.lon, zoom: 10 });
+                setSelectedDevice(data);
               }}
             >
               <option key="" value="">
                 Select a device
               </option>
               {deviceIDs.map((device) => (
-                <option key={device.deviceID} value={JSON.stringify(device)}>
-                  {device.deviceID}
+                <option key={device} value={JSON.stringify(device)}>
+                  {device}
                 </option>
               ))}
             </select>
             <div className="side-by-side">
-              <Table
+              {/* <Table
                 selectedDevice={selectedDevice}
                 baseURL="http://localhost:8000/odometertrip/"
                 title="Trips Calculated Using Odometer"
               />
-              <div style={{ width: "10px" }}></div>
+              <div style={{ width: "10px" }}></div> */}
               <Table
                 selectedDevice={selectedDevice}
-                baseURL="http://localhost:8000/speedtrip/"
+                baseURL="http://localhost:8000"
                 title="Trips Calculated Using Speed"
               />
             </div>
@@ -240,10 +289,17 @@ interface TableProps {
 }
 
 const Table = ({ selectedDevice, baseURL, title }: TableProps) => {
-  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo[]>([]);
+  const [deviceInfo, setDeviceInfo] = useState<DeviceTrips[]>([]);
   useEffect(() => {
     if (selectedDevice !== "") {
-      fetch(`${baseURL}${selectedDevice}`)
+      fetch(`${baseURL}/devices/${selectedDevice}/alltrips`, {
+        method: "GET",
+        headers: new Headers({
+          Authorization:
+            "Bearer " +
+            "eyJhbGciOiJSUzI1NiIsImtpZCI6IjU1ZDhlMDU2MzBmMmI1OGFhMjQzNTVlOTM2OWE1OGQ3NzU3MjFmMzMifQ.eyJpc3MiOiJodHRwOi8vMTI3LjAuMC4xOjU1NTYvZGV4IiwicHJvdmlkZXJfaWQiOiJtb2NrIiwic3ViIjoiQ2cwd0xUTTROUzB5T0RBNE9TMHdFZ1J0YjJOciIsImF1ZCI6ImV4YW1wbGUtYXBwIiwiZXhwIjoxNjYyNzk4NTk1LCJpYXQiOjE2NjI3NTUzOTUsImF0X2hhc2giOiJ2OWhrVkwtLUR6cHRaZndJUXFuWkVRIiwiY19oYXNoIjoiR2VYNzN3Nk9PRC0tb1JVejcwcGlvUSIsImVtYWlsIjoia2lsZ29yZUBraWxnb3JlLnRyb3V0IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJLaWxnb3JlIFRyb3V0In0.syvb9LQdfYoTwRXmlfp8siokzu5pt6QTNgXWfxJV8AyvLNhp7flbMe0NXioPlOOtJv4m-rZdU6cx3wDqk0h3RGCJR-GHABJfjF7djiFNI14Hk_Ox2wceQxUYpiXkhGDLYANfBBy-atDTlwdHtar2Vz-zyBogvwcoL-tB9toXZCxbLulmzLfPDndTsHFOoOzPiLul1Xn_OGdX2rxASyXb99Ed0heGk3kJ1jicEqhDEA8cBGGvxq-7k04WlVLtXZTv-VhCbRud4cfnfef8-3eS8kkRYiyPnNLIVTq8-b0qeyRVXUkB_hdY_ewuN_ke9IyncL-nKWKS8DyO3Od74d8cVQ",
+        }),
+      })
         .then((r) => r.json())
         .then((data) => setDeviceInfo(data as []))
         .catch((e) => console.error(e));
@@ -257,45 +313,14 @@ const Table = ({ selectedDevice, baseURL, title }: TableProps) => {
       <table>
         {selectedDevice !== "" &&
           deviceInfo.map((info, i) => {
-            if (info.order === 0) {
-              return (
-                <>
-                  {info === deviceInfo[0] ? "" : <br />}
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>Longitude</th>
-                      <th>Longitude</th>
-                      <th>Speed</th>
-                      <th>Odometer</th>
-                      <th>Battery Range</th>
-                      <th>Timestamp</th>
-                    </tr>
-                  </thead>
-                  <tr key={i}>
-                    <th>{info.order}</th>
-                    <th>{info.lat}</th>
-                    <th>{info.lon}</th>
-                    <th>{info.speed}</th>
-                    <th>{info.odometer}</th>
-                    <th>{info.chargeRange}</th>
-                    <th>{info.timestamp}</th>
-                  </tr>
-                </>
-              );
-            } else {
-              return (
-                <tr key={i}>
-                  <th>{info.order}</th>
-                  <th>{info.lat}</th>
-                  <th>{info.lon}</th>
-                  <th>{info.speed}</th>
-                  <th>{info.odometer}</th>
-                  <th>{info.chargeRange}</th>
-                  <th>{info.timestamp}</th>
-                </tr>
-              );
-            }
+            return (
+              <tr key={i}>
+                <th>{info.trip_id}</th>
+                <th>{info.device_id}</th>
+                <th>{info.trip_start}</th>
+                <th>{info.trip_end}</th>
+              </tr>
+            );
           })}
       </table>
     </div>
