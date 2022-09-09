@@ -1,6 +1,6 @@
 import "./App.css";
 import ReactMapboxGl, { Layer } from "react-mapbox-gl";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { json } from "stream/consumers";
 
 const MapBox = ReactMapboxGl({
@@ -48,14 +48,14 @@ function App() {
     "http://localhost:7800/public.trips_odometer,public.points_odometer,public.trips_speed/{z}/{x}/{y}.pbf",
   );
 
-  const toggleLayer = (layerID: string) => {
-    const visiblity = myMap?.getLayoutProperty(layerID, "visibility") as string;
-    if (visiblity === "visible") {
-      myMap?.setLayoutProperty(layerID, "visibility", "none");
-    } else {
-      myMap?.setLayoutProperty(layerID, "visibility", "visible");
-    }
-  };
+  // const toggleLayer = (layerID: string) => {
+  //   const visiblity = myMap?.getLayoutProperty(layerID, "visibility") as string;
+  //   if (visiblity === "visible") {
+  //     myMap?.setLayoutProperty(layerID, "visibility", "none");
+  //   } else {
+  //     myMap?.setLayoutProperty(layerID, "visibility", "visible");
+  //   }
+  // };
 
   useEffect(() => {
     if (selectedDevice !== "") {
@@ -157,16 +157,16 @@ function App() {
       <div>
         <div className="side-by-side">
           <button
-            onClick={() => {
-              toggleLayer("public.trips_odometer");
-            }}
+          // onClick={() => {
+          //   toggleLayer("public.trips_odometer");
+          // }}
           >
             Toggle Trips (Odometer - blue)
           </button>
           <button
-            onClick={() => {
-              toggleLayer("public.trips_speed");
-            }}
+          // onClick={() => {
+          //   toggleLayer("public.trips_speed");
+          // }}
           >
             Toggle Trips (Speed - red)
           </button>
