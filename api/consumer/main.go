@@ -72,10 +72,8 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 		existingTrip = val.(*DeviceTrip)
 
 		if newDeviceStatus.Data.Timestamp.Sub(existingTrip.LastActive) <= TripGracePeriod {
-			if newDeviceStatus.Data.Speed > 0 {
-				existingTrip.LastActive = newDeviceStatus.Data.Timestamp
-				ctx.SetValue(existingTrip)
-			}
+			existingTrip.LastActive = newDeviceStatus.Data.Timestamp
+			ctx.SetValue(existingTrip)
 		} else {
 			// Grace period for the existing trip has passed, so need to end it before
 			// doing anything else.
@@ -98,14 +96,16 @@ func (processor *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 		}
 
 	} else {
-		ts := newDeviceStatus.Data.Timestamp.UTC()
-		beginTrip := &DeviceTrip{
-			Id:         ctx.Key(),
-			Start:      ts,
-			LastActive: ts,
+		if newDeviceStatus.Data.Speed > 0 {
+			ts := newDeviceStatus.Data.Timestamp.UTC()
+			beginTrip := &DeviceTrip{
+				Id:         ctx.Key(),
+				Start:      ts,
+				LastActive: ts,
+			}
+			ctx.SetValue(beginTrip)
+			ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: ts})
 		}
-		ctx.SetValue(beginTrip)
-		ctx.Emit(tripstatus, ctx.Key(), TripStatus{DeviceID: ctx.Key(), Start: ts})
 	}
 }
 
