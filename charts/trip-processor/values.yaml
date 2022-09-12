@@ -2,14 +2,14 @@ replicaCount: 1
 image:
   repository: dimozone/trip-processor
   pullPolicy: IfNotPresent
-  tag: ee42798
+  tag: 71f1eb8
 imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
+nameOverride: ''
+fullnameOverride: ''
 serviceAccount:
   create: true
   annotations: {}
-  name: ""
+  name: ''
 podAnnotations: {}
 podSecurityContext:
   runAsNonRoot: true
@@ -46,10 +46,10 @@ ingress:
   className: nginx
   annotations:
     nginx.ingress.kubernetes.io/auth-tls-secret: ingress/cf-origin-ca
-    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
-    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: 'on'
+    nginx.ingress.kubernetes.io/enable-cors: 'true'
     nginx.ingress.kubernetes.io/cors-allow-origin: https://app.dev.dimo.zone
-    nginx.ingress.kubernetes.io/limit-rps: "3"
+    nginx.ingress.kubernetes.io/limit-rps: '3'
     external-dns.alpha.kubernetes.io/hostname: trip-processor.dev.dimo.zone
   hosts:
     - host: trip-processor.dev.dimo.zone
@@ -79,18 +79,18 @@ kafka:
   topics:
     - name: topic.device.trip.event
       config:
-        segment.ms: "3600000"
+        segment.ms: '3600000'
         compression.type: producer
         cleanup.policy: compact,delete
-        min.compaction.lag.ms: "3600000"
+        min.compaction.lag.ms: '3600000'
     - name: trip-processor-group
       config:
-        segment.ms: "3600000"
+        segment.ms: '3600000'
         compression.type: producer
         cleanup.policy: compact
-        min.compaction.lag.ms: "3600000"
-        min.cleanable.dirty.ratio: "0.01"
-        delete.retention.ms: "3600000"
+        min.compaction.lag.ms: '3600000'
+        min.cleanable.dirty.ratio: '0.01'
+        delete.retention.ms: '3600000'
 serviceMonitor:
   enabled: true
   path: /metrics
