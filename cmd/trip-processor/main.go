@@ -97,7 +97,7 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			ID:      ksuid.New().String(),
 			Time:    time.Now(),
 			Subject: userDeviceID,
-			Type:    "zone.dimo.device.trip.state",
+			Type:    "zone.dimo.device.trip.event",
 			Data: TripEvent{
 				DeviceID: userDeviceID,
 				Start:    ts,
