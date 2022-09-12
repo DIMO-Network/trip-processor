@@ -1,5 +1,5 @@
+ENVIRONMENT: local
 MON_PORT: 8888
-
 KAFKA_BROKERS: localhost:9092
 CONSUMER_GROUP: trip-processor
 DEVICE_STATUS_TOPIC: topic.device.status

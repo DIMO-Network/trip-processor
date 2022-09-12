@@ -1,0 +1,50 @@
+replicaCount: 2
+image:
+  repository: dimozone/trip-processor
+  pullPolicy: IfNotPresent
+  tag: 0.9.3
+cronJob:
+  enabled: true
+  schedule: 0 0 * * 0
+env:
+  ENVIRONMENT: prod
+  MON_PORT: 8888
+  KAFKA_BROKERS: kafka-prod-dimo-kafka-kafka-brokers:9092
+  CONSUMER_GROUP: trip-processor
+  DEVICE_STATUS_TOPIC: topic.device.status
+  TRIP_EVENT_TOPIC: topic.device.trip.event
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: ingress/cf-origin-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: 'on'
+    nginx.ingress.kubernetes.io/enable-cors: 'true'
+    nginx.ingress.kubernetes.io/cors-allow-origin: https://app.dimo.zone
+    nginx.ingress.kubernetes.io/limit-rps: '9'
+    external-dns.alpha.kubernetes.io/hostname: trip-processor.dimo.zone
+  hosts:
+    - host: trip-processor.dimo.zone
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+resources:
+  limits:
+    cpu: 1
+    memory: 1024Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podDisruptionBudget:
+  minAvailable: 1
+kafka:
+  clusterName: kafka-prod-dimo-kafka

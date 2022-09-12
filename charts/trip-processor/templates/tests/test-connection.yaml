@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "trip-processor.fullname" . }}-test-connection"
+  labels:
+    {{- include "trip-processor.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "trip-processor.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never
