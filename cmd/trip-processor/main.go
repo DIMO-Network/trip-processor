@@ -170,6 +170,9 @@ func main() {
 
 	serveMonitoring(settings.MonPort, &logger)
 
-	tp := &TripProcessor{logger: &logger}
+	tp := &TripProcessor{
+		logger:         &logger,
+		tripEventTopic: goka.Stream(settings.TripEventTopic),
+	}
 	tp.runProcessor(&settings) // press ctrl-c to stop
 }
