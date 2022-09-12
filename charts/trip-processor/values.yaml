@@ -83,7 +83,7 @@ kafka:
         compression.type: producer
         cleanup.policy: compact,delete
         min.compaction.lag.ms: '3600000'
-    - name: trip-processor-group
+    - name: trip-processor-table
       config:
         segment.ms: '3600000'
         compression.type: producer
