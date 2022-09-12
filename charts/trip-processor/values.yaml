@@ -2,7 +2,7 @@ replicaCount: 1
 image:
   repository: dimozone/trip-processor
   pullPolicy: IfNotPresent
-  tag: 71f1eb8
+  tag: '7714449'
 imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
