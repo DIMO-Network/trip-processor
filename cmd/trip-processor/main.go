@@ -60,8 +60,11 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			ctx.SetValue(existingTrip)
 			return
 		}
+
 		// The grace period for the existing trip has passed. We must end it before potentially
 		// starting a new one.
+		p.logger.Info().Str("userDeviceId", ctx.Key()).Time("start", existingTrip.Data.Start).Time("end", existingTrip.Data.LastActive).Msg("Ending trip.")
+
 		existingTripEnd := &shared.CloudEvent[TripEvent]{
 			ID:      ksuid.New().String(),
 			Time:    time.Now(),
@@ -79,6 +82,7 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 
 	// Start a new trip if the device is moving.
 	if newDeviceStatus.Data.Speed > 0 {
+		p.logger.Info().Str("userDeviceId", ctx.Key()).Msg("Starting trip.")
 		ts := newDeviceStatus.Data.Timestamp.UTC()
 
 		newTripState := &shared.CloudEvent[TripState]{
