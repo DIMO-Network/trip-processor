@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: ./resources/docker/Dockerfile.go
+          file: ./resources/docker/Dockerfile
           push: true
           tags: dimozone/trip-processor:${{ steps.slug.outputs.sha7 }}, dimozone/trip-processor:latest
 
