@@ -1,13 +1,25 @@
-module trips-api
+module github.com/DIMO-Network/trips-api
 
 go 1.18
 
 require (
 	github.com/DIMO-Network/shared v0.4.0
-	github.com/gofiber/fiber/v2 v2.36.0
-	github.com/lib/pq v1.10.6
+	github.com/gofiber/adaptor/v2 v2.1.27
+	github.com/gofiber/fiber/v2 v2.37.1
 	github.com/lovoo/goka v1.1.7
+	github.com/prometheus/client_golang v1.12.1
 	github.com/rs/zerolog v1.28.0
+)
+
+require (
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/cespare/xxhash/v2 v2.1.2 // indirect
+	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/common v0.32.1 // indirect
+	github.com/prometheus/procfs v0.7.3 // indirect
+	google.golang.org/protobuf v1.28.0 // indirect
 )
 
 require (
@@ -40,9 +52,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.14 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
+	github.com/segmentio/ksuid v1.0.4
 	github.com/syndtr/goleveldb v1.0.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.38.0 // indirect
+	github.com/valyala/fasthttp v1.40.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292 // indirect
 	golang.org/x/net v0.0.0-20220520000938-2e3eb7b945c2 // indirect
