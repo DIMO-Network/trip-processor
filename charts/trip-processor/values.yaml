@@ -2,7 +2,7 @@ replicaCount: 1
 image:
   repository: dimozone/trip-processor
   pullPolicy: IfNotPresent
-  tag: '9780e54'
+  tag: e305aea
 imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
