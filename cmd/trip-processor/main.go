@@ -53,7 +53,7 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 	if val := ctx.Value(); val != nil {
 		existingTrip := val.(*shared.CloudEvent[TripState])
 
-		if newDeviceStatus.Data.Timestamp.Sub(existingTrip.Data.LastActive) <= tripGracePeriod {
+		if newDeviceStatus.Data.Timestamp.Sub(existingTrip.Data.LastActive) <= tripGracePeriod && newDeviceStatus.Data.Speed > 0 {
 			// If the new status came within the grace period of the last status, just update
 			// the timestamp and don't emit anything else.
 			existingTrip.Data.LastActive = newDeviceStatus.Data.Timestamp
