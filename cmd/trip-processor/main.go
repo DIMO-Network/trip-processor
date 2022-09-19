@@ -21,11 +21,16 @@ import (
 
 type PartialStatusData struct {
 	Speed     float64   `json:"speed"`
+	Latitude  float64   `json:"latitude"`
+	Longitude float64   `json:"longitude"`
+	Odometer  float64   `json:"odometer"`
+	SOC       float64   `json:"soc"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
 type TripState struct {
 	Start      time.Time `json:"start"`
+	Idle       time.Time `json:"idle"`
 	LastActive time.Time `json:"lastActive"`
 }
 
@@ -53,18 +58,24 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 	if val := ctx.Value(); val != nil {
 		existingTrip := val.(*shared.CloudEvent[TripState])
 
-		if newDeviceStatus.Data.Timestamp.Sub(existingTrip.Data.LastActive) <= tripGracePeriod && newDeviceStatus.Data.Speed > 0 {
-			// If the new status came within the grace period of the last status, just update
-			// the timestamp and don't emit anything else.
+		if newDeviceStatus.Data.Timestamp.Sub(existingTrip.Data.LastActive) <= tripGracePeriod {
+			// new status came within the grace period of the last status
+
+			if newDeviceStatus.Data.Speed == 0.0 && existingTrip.Data.Idle.IsZero() {
+				// if trip is idle, note the start of the idle period
+				existingTrip.Data.Idle = newDeviceStatus.Data.Timestamp
+				return
+			}
+
+			// if trip is active, update last active timestamp and clear any idle state
 			existingTrip.Data.LastActive = newDeviceStatus.Data.Timestamp
+			existingTrip.Data.Idle = time.Time{}
 			ctx.SetValue(existingTrip)
 			return
 		}
 
 		// The grace period for the existing trip has passed. We must end it before potentially
 		// starting a new one.
-		p.logger.Info().Str("userDeviceId", ctx.Key()).Time("start", existingTrip.Data.Start).Time("end", existingTrip.Data.LastActive).Msg("Ending trip.")
-
 		existingTripEnd := &shared.CloudEvent[TripEvent]{
 			ID:      ksuid.New().String(),
 			Time:    time.Now(),
@@ -73,8 +84,17 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 			Data: TripEvent{
 				DeviceID: ctx.Key(),
 				Start:    existingTrip.Data.Start,
-				End:      existingTrip.Data.LastActive,
 			},
+		}
+
+		if !existingTrip.Data.Idle.IsZero() {
+			// if idle status is observed, return start of idle as trip end
+			existingTripEnd.Data.End = existingTrip.Data.Idle
+			p.logger.Info().Str("userDeviceId", ctx.Key()).Time("start", existingTrip.Data.Start).Time("end", existingTrip.Data.Idle).Msg("Ending trip.")
+		} else {
+			// otherwise, set the trip end as the last active timestamp
+			existingTripEnd.Data.End = existingTrip.Data.LastActive
+			p.logger.Info().Str("userDeviceId", ctx.Key()).Time("start", existingTrip.Data.Start).Time("end", existingTrip.Data.LastActive).Msg("Ending trip.")
 		}
 		ctx.Emit(p.tripEventTopic, userDeviceID, existingTripEnd)
 		ctx.Delete()
