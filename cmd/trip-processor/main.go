@@ -132,30 +132,30 @@ func (p *TripProcessor) processDeviceStatus(ctx goka.Context, msg any) {
 }
 
 // process messages until ctrl-c is pressed
-func (tp *TripProcessor) runProcessor(settings *config.Settings) {
+func (p *TripProcessor) runProcessor(settings *config.Settings) {
 	brokers := strings.Split(settings.KafkaBrokers, ",")
 
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(
 		goka.Group(settings.ConsumerGroup),
-		goka.Input(goka.Stream(settings.DeviceStatusTopic), deviceStatusCodec, tp.processDeviceStatus),
+		goka.Input(goka.Stream(settings.DeviceStatusTopic), deviceStatusCodec, p.processDeviceStatus),
 		goka.Persist(tripStateCodec),
 		goka.Output(goka.Stream(settings.TripEventTopic), tripEventCodec),
 	)
 
-	p, err := goka.NewProcessor(brokers, g)
+	tp, err := goka.NewProcessor(brokers, g)
 	if err != nil {
-		tp.logger.Fatal().Err(err).Msg("Failed to create processor.")
+		p.logger.Fatal().Err(err).Msg("Failed to create processor.")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool)
 	go func() {
 		defer close(done)
-		if err = p.Run(ctx); err != nil {
-			tp.logger.Fatal().Err(err).Msg("Processor terminated with an error.")
+		if err = tp.Run(ctx); err != nil {
+			p.logger.Fatal().Err(err).Msg("Processor terminated with an error.")
 		} else {
-			tp.logger.Info().Msg("Processor shut down cleanly.")
+			p.logger.Info().Msg("Processor shut down cleanly.")
 		}
 	}()
 
