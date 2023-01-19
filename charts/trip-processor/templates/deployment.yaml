@@ -46,8 +46,6 @@ spec:
           envFrom:
           - configMapRef:
               name: {{ include "trip-processor.fullname" . }}-config
-          - secretRef:
-              name: {{ include "trip-processor.fullname" . }}-secret
           ports:
 {{ toYaml .Values.ports | indent 12 }}
           livenessProbe:
