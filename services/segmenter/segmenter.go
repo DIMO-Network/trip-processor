@@ -1,8 +1,9 @@
-package services
+package segmenter
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/DIMO-Network/shared"
@@ -19,6 +20,7 @@ type SegmentProcessor struct {
 	segments    map[string]SegmentState
 	producer    sarama.SyncProducer
 	gracePeriod time.Duration
+	topic       string
 }
 
 type PartialStatusData struct {
@@ -44,17 +46,32 @@ type Coords struct {
 	Longitude float64   `json:"longitude"`
 }
 
-func NewSegmenter(log *zerolog.Logger, s *config.Settings) *SegmentProcessor {
+type SegmentEvent struct {
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+	DeviceID string    `json:"deviceID"`
+}
+
+func New(log *zerolog.Logger, s *config.Settings) *SegmentProcessor {
+	kc := sarama.NewConfig()
+	kc.Producer.Return.Successes = true
+	p, err := sarama.NewSyncProducer(strings.Split(s.KafkaBrokers, ","), kc)
+	if err != nil {
+		panic(err)
+	}
+
 	return &SegmentProcessor{
 		segments:    make(map[string]SegmentState),
 		logger:      log,
 		gracePeriod: tripGracePeriod,
+		producer:    p,
+		topic:       s.TripEventTopic,
 	}
 }
 
 func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Coord) bool {
 	_, km := haversine.Distance(p1, p2)
-	if km > 0 { // do we want to include a threshold here for gps drift?
+	if km > 0.01524 { // 50 feet, accounts for gps drift (arbitrary)
 		return true
 	}
 	return false
@@ -76,7 +93,7 @@ func (sp *SegmentProcessor) Process(ctx context.Context, event *shared.CloudEven
 		haversine.Coord{Lat: segState.Latest.Latitude, Lon: segState.Latest.Longitude},
 		haversine.Coord{Lat: event.Data.Latitude, Lon: event.Data.Longitude},
 	) {
-		fmt.Println("\nStart a trip")
+		// fmt.Println("\nStart a trip")
 		segState.Start.Latitude = segState.Latest.Latitude
 		segState.Start.Longitude = segState.Latest.Longitude
 		segState.Start.Time = segState.Latest.Time
@@ -94,8 +111,22 @@ func (sp *SegmentProcessor) Process(ctx context.Context, event *shared.CloudEven
 			haversine.Coord{Lat: segState.Start.Latitude, Lon: segState.Start.Longitude},
 		)
 		if mi > 0.01 {
-			fmt.Printf("\tTrip Details:\tStart: %+v End: %+v Distance Traveled: %+v\n", segState.Start.Time, segState.Latest.Time, mi)
-			fmt.Println("Trip Ends\n")
+			completedSeg := SegmentEvent{
+				Start:    segState.Start.Time,
+				End:      segState.Latest.Time,
+				DeviceID: event.Subject,
+			}
+			b, err := json.Marshal(completedSeg)
+			if err != nil {
+				return err
+			}
+			sp.producer.SendMessage(&sarama.ProducerMessage{
+				Topic: sp.topic,
+				Key:   sarama.StringEncoder(event.Subject),
+				Value: sarama.ByteEncoder(b),
+			})
+			// fmt.Printf("\tTrip Details:\tStart: %+v End: %+v Distance Traveled: %+v\n", segState.Start.Time, segState.Latest.Time, mi)
+			// fmt.Println("Trip Ends\n")
 		}
 		delete(sp.segments, event.Subject)
 		return nil
@@ -105,8 +136,6 @@ func (sp *SegmentProcessor) Process(ctx context.Context, event *shared.CloudEven
 	segState.Latest.Longitude = event.Data.Longitude
 	segState.Latest.Time = event.Data.Timestamp
 	sp.segments[event.Subject] = segState
-
-	fmt.Printf("\t\tUpdating Record With:\tTime: %+v\tLatitude %+v\tLongitude %+v\n", segState.Latest.Time, segState.Latest.Latitude, segState.Latest.Longitude)
 
 	return nil
 }

@@ -7,7 +7,7 @@ import (
 
 	"github.com/DIMO-Network/shared/kafka"
 	"github.com/DIMO-Network/trips-api/internal/config"
-	services "github.com/DIMO-Network/trips-api/services/consumer"
+	"github.com/DIMO-Network/trips-api/services/segmenter"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -32,7 +32,7 @@ func main() {
 		Group:   "segment-consumer",
 	}
 
-	segmenter := services.NewSegmenter(&logger, &settings)
+	segmenter := segmenter.New(&logger, &settings)
 
 	if err := kafka.Consume(ctx, kc, segmenter.Process, &logger); err != nil {
 		logger.Fatal().Err(err).Msg("Couldn't start event consumer.")
