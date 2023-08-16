@@ -71,13 +71,10 @@ func New(log *zerolog.Logger, s *config.Settings) *SegmentProcessor {
 
 func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Coord) bool {
 	_, km := haversine.Distance(p1, p2)
-	if km > 0.01524 { // 50 feet, accounts for gps drift (arbitrary)
-		return true
-	}
-	return false
+	return km > 0.01524
 }
 
-func (sp *SegmentProcessor) Process(ctx context.Context, event *shared.CloudEvent[PartialStatusData]) error {
+func (sp *SegmentProcessor) Process(_ context.Context, event *shared.CloudEvent[PartialStatusData]) error {
 	var segState SegmentState
 	var ok bool
 	segState, ok = sp.segments[event.Subject]
@@ -120,11 +117,14 @@ func (sp *SegmentProcessor) Process(ctx context.Context, event *shared.CloudEven
 			if err != nil {
 				return err
 			}
-			sp.producer.SendMessage(&sarama.ProducerMessage{
+			_, _, err = sp.producer.SendMessage(&sarama.ProducerMessage{
 				Topic: sp.topic,
 				Key:   sarama.StringEncoder(event.Subject),
 				Value: sarama.ByteEncoder(b),
 			})
+			if err != nil {
+				return err
+			}
 			// fmt.Printf("\tTrip Details:\tStart: %+v End: %+v Distance Traveled: %+v\n", segState.Start.Time, segState.Latest.Time, mi)
 			// fmt.Println("Trip Ends\n")
 		}
