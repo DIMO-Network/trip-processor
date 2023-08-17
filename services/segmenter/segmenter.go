@@ -102,5 +102,4 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	s.Latest.Longitude = newDeviceStatus.Data.Longitude
 	s.Latest.Time = newDeviceStatus.Data.Timestamp
 	ctx.SetValue(s)
-	return
 }
