@@ -28,9 +28,10 @@ type PartialStatusData struct {
 }
 
 type SegmentState struct {
-	Start  Coords `json:"start"`
-	Latest Coords `json:"current"`
-	Active bool   `json:"active"`
+	Start  Coords        `json:"start"`
+	Latest Coords        `json:"current"`
+	Status SegmentStatus `json:"status"`
+	Idle   time.Time     `json:"idle"`
 }
 
 type Coords struct {
@@ -44,6 +45,15 @@ type SegmentEvent struct {
 	End      time.Time `json:"end"`
 	DeviceID string    `json:"deviceID"`
 }
+
+// segment status
+type SegmentStatus string
+
+const (
+	NoStatus     SegmentStatus = ""
+	ActiveStatus               = "ActiveStatus"
+	IdleStatus                 = "IdleStatus"
+)
 
 func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProcessor {
 	return &SegmentProcessor{
@@ -70,23 +80,60 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	state := &SegmentState{}
 	if val := ctx.Value(); val != nil {
 		state = val.(*SegmentState)
-
-		if !state.Active && sp.MovementDetected(
+		movement := sp.MovementDetected(
 			haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
 			haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
-		) {
+		)
+
+		// if there is no active trip but we see movement, begin trip from the point the movement originated from
+		if state.Status == NoStatus && movement {
 			state.Start.Latitude = state.Latest.Latitude
 			state.Start.Longitude = state.Latest.Longitude
 			state.Start.Time = state.Latest.Time
 			state.Latest.Latitude = newDeviceStatus.Data.Latitude
 			state.Latest.Longitude = newDeviceStatus.Data.Longitude
 			state.Latest.Time = newDeviceStatus.Data.Timestamp
-			state.Active = true
+			state.Idle = time.Time{}
+			state.Status = ActiveStatus
 			ctx.SetValue(state)
 			return
 		}
 
-		if state.Active && newDeviceStatus.Data.Timestamp.Sub(state.Latest.Time) > sp.GracePeriod {
+		if state.Status != ActiveStatus && movement {
+			state.Status = ActiveStatus
+			state.Idle = time.Time{}
+			state.Latest.Latitude = newDeviceStatus.Data.Latitude
+			state.Latest.Longitude = newDeviceStatus.Data.Longitude
+			state.Latest.Time = newDeviceStatus.Data.Timestamp
+			return
+		}
+
+		if state.Status == ActiveStatus && !movement {
+			state.Status = IdleStatus
+			if state.Idle.IsZero() {
+				state.Idle = state.Latest.Time
+			}
+			state.Latest.Latitude = newDeviceStatus.Data.Latitude
+			state.Latest.Longitude = newDeviceStatus.Data.Longitude
+			state.Latest.Time = newDeviceStatus.Data.Timestamp
+			return
+		}
+
+		// if there is an active trip but the grace period has been exceeded, end the trip
+		if state.Status == ActiveStatus && newDeviceStatus.Data.Timestamp.Sub(state.Latest.Time) > sp.GracePeriod {
+			event := SegmentEvent{
+				Start:    state.Start.Time,
+				End:      state.Latest.Time,
+				DeviceID: userDeviceID,
+			}
+
+			ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
+			ctx.Delete()
+			return
+		}
+
+		// if there is an idle trip that has exceeded the grace period, end the trip
+		if state.Status == IdleStatus && newDeviceStatus.Data.Timestamp.Sub(state.Idle) > sp.GracePeriod {
 			event := SegmentEvent{
 				Start:    state.Start.Time,
 				End:      state.Latest.Time,
