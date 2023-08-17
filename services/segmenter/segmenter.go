@@ -71,7 +71,7 @@ func New(log *zerolog.Logger, s *config.Settings) *SegmentProcessor {
 
 func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Coord) bool {
 	_, km := haversine.Distance(p1, p2)
-	return km > 0.01524
+	return km > 0.01 // estimate of point-to-point drift (10meters,~33feet)
 }
 
 func (sp *SegmentProcessor) Process(_ context.Context, event *shared.CloudEvent[PartialStatusData]) error {
@@ -90,7 +90,6 @@ func (sp *SegmentProcessor) Process(_ context.Context, event *shared.CloudEvent[
 		haversine.Coord{Lat: segState.Latest.Latitude, Lon: segState.Latest.Longitude},
 		haversine.Coord{Lat: event.Data.Latitude, Lon: event.Data.Longitude},
 	) {
-		// fmt.Println("\nStart a trip")
 		segState.Start.Latitude = segState.Latest.Latitude
 		segState.Start.Longitude = segState.Latest.Longitude
 		segState.Start.Time = segState.Latest.Time
@@ -125,8 +124,6 @@ func (sp *SegmentProcessor) Process(_ context.Context, event *shared.CloudEvent[
 			if err != nil {
 				return err
 			}
-			// fmt.Printf("\tTrip Details:\tStart: %+v End: %+v Distance Traveled: %+v\n", segState.Start.Time, segState.Latest.Time, mi)
-			// fmt.Println("Trip Ends\n")
 		}
 		delete(sp.segments, event.Subject)
 		return nil
