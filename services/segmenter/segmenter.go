@@ -34,9 +34,10 @@ type SegmentState struct {
 }
 
 type Coords struct {
-	Time      time.Time `json:"time"`
-	Latitude  float64   `json:"latitude"`
-	Longitude float64   `json:"longitude"`
+	Time time.Time `json:"time"`
+	// Latitude  float64   `json:"latitude"`
+	// Longitude float64   `json:"longitude"`
+	RunTime int64 `json:"runTime"`
 }
 
 type SegmentEvent struct {
@@ -71,19 +72,28 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	if val := ctx.Value(); val != nil {
 		state = val.(*SegmentState)
 
-		if !state.Active && sp.MovementDetected(
-			haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
-			haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
-		) {
-			state.Start.Latitude = state.Latest.Latitude
-			state.Start.Longitude = state.Latest.Longitude
+		// if !state.Active && sp.MovementDetected(
+		// 	haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
+		// 	haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
+		// ) {
+		// 	state.Start.Latitude = state.Latest.Latitude
+		// 	state.Start.Longitude = state.Latest.Longitude
+		// 	state.Start.Time = state.Latest.Time
+		// 	state.Latest.Latitude = newDeviceStatus.Data.Latitude
+		// 	state.Latest.Longitude = newDeviceStatus.Data.Longitude
+		// 	state.Latest.Time = newDeviceStatus.Data.Timestamp
+		// 	state.Active = true
+		// 	ctx.SetValue(state)
+		// 	return
+		// }
+		if !state.Active && newDeviceStatus.Data.RunTime > state.Latest.RunTime {
+			state.Start.RunTime = state.Latest.RunTime
 			state.Start.Time = state.Latest.Time
-			state.Latest.Latitude = newDeviceStatus.Data.Latitude
-			state.Latest.Longitude = newDeviceStatus.Data.Longitude
-			state.Latest.Time = newDeviceStatus.Data.Timestamp
+			state.Latest.RunTime = newDeviceStatus.Data.RunTime
+			state.Latest.Time = newDeviceStatus.Time
 			state.Active = true
 			ctx.SetValue(state)
-			return
+
 		}
 
 		if state.Active && newDeviceStatus.Data.Timestamp.Sub(state.Latest.Time) > sp.GracePeriod {
@@ -99,8 +109,9 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 		}
 	}
 
-	state.Latest.Latitude = newDeviceStatus.Data.Latitude
-	state.Latest.Longitude = newDeviceStatus.Data.Longitude
+	// state.Latest.Latitude = newDeviceStatus.Data.Latitude
+	// state.Latest.Longitude = newDeviceStatus.Data.Longitude
+	state.Latest.RunTime = newDeviceStatus.Data.RunTime
 	state.Latest.Time = newDeviceStatus.Data.Timestamp
 	ctx.SetValue(state)
 }
