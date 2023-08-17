@@ -3,18 +3,27 @@ package main
 import (
 	"context"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
-	"github.com/DIMO-Network/shared/kafka"
 	"github.com/DIMO-Network/trips-api/internal/config"
 	"github.com/DIMO-Network/trips-api/services/segmenter"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
+	"github.com/lovoo/goka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/DIMO-Network/shared"
 	"github.com/rs/zerolog"
 )
+
+const tripGracePeriod = 15 * time.Minute
+
+var deviceStatusCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.PartialStatusData]]{}
+var segmentStateCodec = &shared.JSONCodec[segmenter.SegmentState]{}
+var segmentEventCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.SegmentEvent]]{}
 
 func main() {
 	ctx := context.Background()
@@ -26,27 +35,57 @@ func main() {
 	}
 	logger.Info().Interface("settings", settings).Msg("Settings loaded.")
 
-	kc := kafka.Config{
-		Brokers: strings.Split(settings.KafkaBrokers, ","),
-		Topic:   settings.DeviceStatusTopic,
-		Group:   "segment-consumer",
+	segmenter := segmenter.New(&logger, tripGracePeriod, &settings)
+
+	serveMonitoring(settings.MonPort, &logger)
+
+	brokers := strings.Split(settings.KafkaBrokers, ",")
+
+	// Define a new processor group. The group defines all inputs, outputs, and
+	// serialization formats. The group-table topic is "example-group-table".
+	g := goka.DefineGroup(
+		goka.Group(settings.ConsumerGroup),
+		goka.Input(goka.Stream(settings.DeviceStatusTopic), deviceStatusCodec, segmenter.Process),
+		goka.Persist(segmentStateCodec),
+		goka.Output(goka.Stream(settings.TripEventTopic), segmentEventCodec),
+	)
+
+	p, err := goka.NewProcessor(brokers, g)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to create processor.")
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool)
+	go func() {
+		defer close(done)
+		if err = p.Run(ctx); err != nil {
+			logger.Fatal().Err(err).Msg("Processor terminated with an error.")
+		} else {
+			logger.Info().Msg("Processor shut down cleanly.")
+		}
+	}()
 
-	segmenter := segmenter.New(&logger, &settings)
+	wait := make(chan os.Signal, 1)
+	signal.Notify(wait, syscall.SIGINT, syscall.SIGTERM)
+	<-wait   // wait for SIGINT/SIGTERM
+	cancel() // gracefully stop processor
+	<-done
 
-	if err := kafka.Consume(ctx, kc, segmenter.Process, &logger); err != nil {
-		logger.Fatal().Err(err).Msg("Couldn't start event consumer.")
-	}
+}
 
-	logger.Info().Str("port", settings.MonPort).Msg("Starting monitoring web server.")
+func serveMonitoring(port string, logger *zerolog.Logger) *fiber.App {
+	logger.Info().Str("port", port).Msg("Starting monitoring web server.")
 
 	monApp := fiber.New(fiber.Config{DisableStartupMessage: true})
 
 	monApp.Get("/", func(c *fiber.Ctx) error { return nil })
 	monApp.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
-	if err := monApp.Listen(":" + settings.MonPort); err != nil {
-		logger.Fatal().Err(err).Str("port", settings.MonPort).Msg("Failed to start monitoring web server.")
-	}
+	go func() {
+		if err := monApp.Listen(":" + port); err != nil {
+			logger.Fatal().Err(err).Str("port", port).Msg("Failed to start monitoring web server.")
+		}
+	}()
 
+	return monApp
 }

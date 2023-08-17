@@ -1,26 +1,20 @@
 package segmenter
 
 import (
-	"context"
-	"encoding/json"
-	"strings"
+	"fmt"
 	"time"
 
 	"github.com/DIMO-Network/shared"
 	"github.com/DIMO-Network/trips-api/internal/config"
 	"github.com/DIMO-Network/trips-api/services/haversine"
-	"github.com/IBM/sarama"
+	"github.com/lovoo/goka"
 	"github.com/rs/zerolog"
 )
 
-const tripGracePeriod = 15 * time.Minute
-
 type SegmentProcessor struct {
-	logger      *zerolog.Logger
-	segments    map[string]SegmentState
-	producer    sarama.SyncProducer
-	gracePeriod time.Duration
-	topic       string
+	logger                *zerolog.Logger
+	GracePeriod           time.Duration
+	CompletedSegmentTopic goka.Stream
 }
 
 type PartialStatusData struct {
@@ -52,20 +46,11 @@ type SegmentEvent struct {
 	DeviceID string    `json:"deviceID"`
 }
 
-func New(log *zerolog.Logger, s *config.Settings) *SegmentProcessor {
-	kc := sarama.NewConfig()
-	kc.Producer.Return.Successes = true
-	p, err := sarama.NewSyncProducer(strings.Split(s.KafkaBrokers, ","), kc)
-	if err != nil {
-		panic(err)
-	}
-
+func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProcessor {
 	return &SegmentProcessor{
-		segments:    make(map[string]SegmentState),
-		logger:      log,
-		gracePeriod: tripGracePeriod,
-		producer:    p,
-		topic:       s.TripEventTopic,
+		logger:                log,
+		GracePeriod:           gp,
+		CompletedSegmentTopic: goka.Stream(s.TripEventTopic),
 	}
 }
 
@@ -74,65 +59,52 @@ func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Co
 	return km > 0.01 // estimate of point-to-point drift (10meters,~33feet)
 }
 
-func (sp *SegmentProcessor) Process(_ context.Context, event *shared.CloudEvent[PartialStatusData]) error {
-	var segState SegmentState
-	var ok bool
-	segState, ok = sp.segments[event.Subject]
-	if !ok {
-		segState.Latest.Latitude = event.Data.Latitude
-		segState.Latest.Longitude = event.Data.Longitude
-		segState.Latest.Time = event.Data.Timestamp
-		sp.segments[event.Subject] = segState
-		return nil
-	}
+func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
+	userDeviceID := ctx.Key()
+	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
 
-	if !segState.Active && sp.MovementDetected(
-		haversine.Coord{Lat: segState.Latest.Latitude, Lon: segState.Latest.Longitude},
-		haversine.Coord{Lat: event.Data.Latitude, Lon: event.Data.Longitude},
-	) {
-		segState.Start.Latitude = segState.Latest.Latitude
-		segState.Start.Longitude = segState.Latest.Longitude
-		segState.Start.Time = segState.Latest.Time
-		segState.Latest.Latitude = event.Data.Latitude
-		segState.Latest.Longitude = event.Data.Longitude
-		segState.Latest.Time = event.Data.Timestamp
-		segState.Active = true
-		sp.segments[event.Subject] = segState
-		return nil
-	}
+	if val := ctx.Value(); val != nil {
+		fmt.Println(val)
+		event := val.(*SegmentState)
 
-	if segState.Active && event.Data.Timestamp.Sub(segState.Latest.Time) > sp.gracePeriod {
-		mi, _ := haversine.Distance(
-			haversine.Coord{Lat: segState.Latest.Latitude, Lon: segState.Latest.Longitude},
-			haversine.Coord{Lat: segState.Start.Latitude, Lon: segState.Start.Longitude},
-		)
-		if mi > 0.01 {
-			completedSeg := SegmentEvent{
-				Start:    segState.Start.Time,
-				End:      segState.Latest.Time,
-				DeviceID: event.Subject,
-			}
-			b, err := json.Marshal(completedSeg)
-			if err != nil {
-				return err
-			}
-			_, _, err = sp.producer.SendMessage(&sarama.ProducerMessage{
-				Topic: sp.topic,
-				Key:   sarama.StringEncoder(event.Subject),
-				Value: sarama.ByteEncoder(b),
-			})
-			if err != nil {
-				return err
-			}
+		if !event.Active && sp.MovementDetected(
+			haversine.Coord{Lat: event.Latest.Latitude, Lon: event.Latest.Longitude},
+			haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
+		) {
+			event.Start.Latitude = event.Latest.Latitude
+			event.Start.Longitude = event.Latest.Longitude
+			event.Start.Time = event.Latest.Time
+			event.Latest.Latitude = newDeviceStatus.Data.Latitude
+			event.Latest.Longitude = newDeviceStatus.Data.Longitude
+			event.Latest.Time = newDeviceStatus.Data.Timestamp
+			event.Active = true
+			ctx.SetValue(event)
+			return
 		}
-		delete(sp.segments, event.Subject)
-		return nil
+
+		if event.Active && newDeviceStatus.Data.Timestamp.Sub(event.Latest.Time) > sp.GracePeriod {
+			completedSeg := SegmentEvent{
+				Start:    event.Start.Time,
+				End:      event.Latest.Time,
+				DeviceID: userDeviceID,
+			}
+
+			ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, completedSeg)
+			ctx.Delete()
+			return
+		}
+
+		event.Latest.Latitude = newDeviceStatus.Data.Latitude
+		event.Latest.Longitude = newDeviceStatus.Data.Longitude
+		event.Latest.Time = newDeviceStatus.Data.Timestamp
+		ctx.SetValue(event)
+		return
 	}
 
-	segState.Latest.Latitude = event.Data.Latitude
-	segState.Latest.Longitude = event.Data.Longitude
-	segState.Latest.Time = event.Data.Timestamp
-	sp.segments[event.Subject] = segState
-
-	return nil
+	var s SegmentState
+	s.Latest.Latitude = newDeviceStatus.Data.Latitude
+	s.Latest.Longitude = newDeviceStatus.Data.Longitude
+	s.Latest.Time = newDeviceStatus.Data.Timestamp
+	ctx.SetValue(s)
+	return
 }
