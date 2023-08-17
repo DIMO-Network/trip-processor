@@ -54,6 +54,12 @@ func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProc
 }
 
 func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Coord) bool {
+	if p1.Lat == 0.0 || p1.Lon == 0.0 {
+		return false
+	}
+	if p2.Lat == 0.0 || p2.Lon == 0.0 {
+		return false
+	}
 	_, km := haversine.Distance(p1, p2)
 	return km > 0.01 // estimate of point-to-point drift (10meters,~33feet)
 }
@@ -61,8 +67,9 @@ func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Co
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
 	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
+	state := &SegmentState{}
 	if val := ctx.Value(); val != nil {
-		state := val.(*SegmentState)
+		state = val.(*SegmentState)
 
 		if !state.Active && sp.MovementDetected(
 			haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
@@ -90,16 +97,10 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 			ctx.Delete()
 			return
 		}
-		state.Latest.Latitude = newDeviceStatus.Data.Latitude
-		state.Latest.Longitude = newDeviceStatus.Data.Longitude
-		state.Latest.Time = newDeviceStatus.Data.Timestamp
-		ctx.SetValue(state)
-		return
 	}
 
-	var s SegmentState
-	s.Latest.Latitude = newDeviceStatus.Data.Latitude
-	s.Latest.Longitude = newDeviceStatus.Data.Longitude
-	s.Latest.Time = newDeviceStatus.Data.Timestamp
-	ctx.SetValue(s)
+	state.Latest.Latitude = newDeviceStatus.Data.Latitude
+	state.Latest.Longitude = newDeviceStatus.Data.Longitude
+	state.Latest.Time = newDeviceStatus.Data.Timestamp
+	ctx.SetValue(state)
 }
