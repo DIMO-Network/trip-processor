@@ -1,7 +1,6 @@
 package segmenter
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/DIMO-Network/shared"
@@ -62,42 +61,39 @@ func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Co
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
 	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
-
 	if val := ctx.Value(); val != nil {
-		fmt.Println(val)
-		event := val.(*SegmentState)
+		state := val.(*SegmentState)
 
-		if !event.Active && sp.MovementDetected(
-			haversine.Coord{Lat: event.Latest.Latitude, Lon: event.Latest.Longitude},
+		if !state.Active && sp.MovementDetected(
+			haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
 			haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
 		) {
-			event.Start.Latitude = event.Latest.Latitude
-			event.Start.Longitude = event.Latest.Longitude
-			event.Start.Time = event.Latest.Time
-			event.Latest.Latitude = newDeviceStatus.Data.Latitude
-			event.Latest.Longitude = newDeviceStatus.Data.Longitude
-			event.Latest.Time = newDeviceStatus.Data.Timestamp
-			event.Active = true
-			ctx.SetValue(event)
+			state.Start.Latitude = state.Latest.Latitude
+			state.Start.Longitude = state.Latest.Longitude
+			state.Start.Time = state.Latest.Time
+			state.Latest.Latitude = newDeviceStatus.Data.Latitude
+			state.Latest.Longitude = newDeviceStatus.Data.Longitude
+			state.Latest.Time = newDeviceStatus.Data.Timestamp
+			state.Active = true
+			ctx.SetValue(state)
 			return
 		}
 
-		if event.Active && newDeviceStatus.Data.Timestamp.Sub(event.Latest.Time) > sp.GracePeriod {
-			completedSeg := SegmentEvent{
-				Start:    event.Start.Time,
-				End:      event.Latest.Time,
+		if state.Active && newDeviceStatus.Data.Timestamp.Sub(state.Latest.Time) > sp.GracePeriod {
+			event := SegmentEvent{
+				Start:    state.Start.Time,
+				End:      state.Latest.Time,
 				DeviceID: userDeviceID,
 			}
 
-			ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, completedSeg)
+			ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
 			ctx.Delete()
 			return
 		}
-
-		event.Latest.Latitude = newDeviceStatus.Data.Latitude
-		event.Latest.Longitude = newDeviceStatus.Data.Longitude
-		event.Latest.Time = newDeviceStatus.Data.Timestamp
-		ctx.SetValue(event)
+		state.Latest.Latitude = newDeviceStatus.Data.Latitude
+		state.Latest.Longitude = newDeviceStatus.Data.Longitude
+		state.Latest.Time = newDeviceStatus.Data.Timestamp
+		ctx.SetValue(state)
 		return
 	}
 
