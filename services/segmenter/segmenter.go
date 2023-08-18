@@ -5,7 +5,6 @@ import (
 
 	"github.com/DIMO-Network/shared"
 	"github.com/DIMO-Network/trips-api/internal/config"
-	"github.com/DIMO-Network/trips-api/services/haversine"
 	"github.com/lovoo/goka"
 	"github.com/rs/zerolog"
 )
@@ -17,26 +16,29 @@ type SegmentProcessor struct {
 }
 
 type PartialStatusData struct {
-	Altitude  float64   `json:"altitude"`
-	Latitude  float64   `json:"latitude"`
-	Longitude float64   `json:"longitude"`
-	RunTime   int64     `json:"runTime"`
-	Speed     float64   `json:"speed"`
-	Odometer  float64   `json:"odometer"`
-	SOC       float64   `json:"soc"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-type SegmentState struct {
-	Start  Coords `json:"start"`
-	Latest Coords `json:"current"`
-	Active bool   `json:"active"`
+type State struct {
+	ActiveSegment *Segment  `json:"activeSegment,omitempty"`
+	Latest        PointTime `json:"latest"`
 }
 
-type Coords struct {
-	Time      time.Time `json:"time"`
-	Latitude  float64   `json:"latitude"`
-	Longitude float64   `json:"longitude"`
+type Segment struct {
+	Start        PointTime `json:"start"`
+	LastMovement PointTime `json:"lastMovement"`
+}
+
+type Point struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+type PointTime struct {
+	Point Point     `json:"point"`
+	Time  time.Time `json:"time"`
 }
 
 type SegmentEvent struct {
@@ -53,54 +55,75 @@ func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProc
 	}
 }
 
-func (sp *SegmentProcessor) MovementDetected(p1 haversine.Coord, p2 haversine.Coord) bool {
-	if p1.Lat == 0.0 || p1.Lon == 0.0 {
-		return false
-	}
-	if p2.Lat == 0.0 || p2.Lon == 0.0 {
-		return false
-	}
-	_, km := haversine.Distance(p1, p2)
-	return km > 0.01 // estimate of point-to-point drift (10meters,~33feet)
+func (sp *SegmentProcessor) MovementDetected(p1 Point, p2 Point) bool {
+	return Distance(p1, p2) > 10 // estimate of point-to-point drift (10meters,~33feet)
 }
 
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
 	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
-	state := &SegmentState{}
-	if val := ctx.Value(); val != nil {
-		state = val.(*SegmentState)
 
-		if !state.Active && sp.MovementDetected(
-			haversine.Coord{Lat: state.Latest.Latitude, Lon: state.Latest.Longitude},
-			haversine.Coord{Lat: newDeviceStatus.Data.Latitude, Lon: newDeviceStatus.Data.Longitude},
-		) {
-			state.Start.Latitude = state.Latest.Latitude
-			state.Start.Longitude = state.Latest.Longitude
-			state.Start.Time = state.Latest.Time
-			state.Latest.Latitude = newDeviceStatus.Data.Latitude
-			state.Latest.Longitude = newDeviceStatus.Data.Longitude
-			state.Latest.Time = newDeviceStatus.Data.Timestamp
-			state.Active = true
-			ctx.SetValue(state)
-			return
-		}
+	logger := sp.logger.With().Str("userDeviceId", userDeviceID).Time("eventTime", newDeviceStatus.Data.Timestamp).Logger()
 
-		if state.Active && newDeviceStatus.Data.Timestamp.Sub(state.Latest.Time) > sp.GracePeriod {
-			event := SegmentEvent{
-				Start:    state.Start.Time,
-				End:      state.Latest.Time,
-				DeviceID: userDeviceID,
+	if newDeviceStatus.Source != "dimo/integration/27qftVRWQYpVDcO5DltO5Ojbjxk" ||
+		newDeviceStatus.Data.Latitude == nil ||
+		newDeviceStatus.Data.Longitude == nil {
+		return
+	}
+
+	newPoint := Point{
+		Latitude:  *newDeviceStatus.Data.Latitude,
+		Longitude: *newDeviceStatus.Data.Longitude,
+	}
+
+	newPointTime := PointTime{
+		Point: newPoint,
+		Time:  newDeviceStatus.Data.Timestamp,
+	}
+
+	var state *State
+
+	val := ctx.Value()
+	if val == nil {
+		logger.Debug().Msg("New vehicle.")
+		ctx.SetValue(&State{Latest: newPointTime})
+		return
+	}
+
+	state = val.(*State)
+
+	dist := Distance(state.Latest.Point, newPoint)
+
+	if state.ActiveSegment == nil {
+		if dist >= 10 {
+			logger.Debug().Msgf("Moved %fm, starting a segment.", dist)
+			state.ActiveSegment = &Segment{
+				Start:        newPointTime,
+				LastMovement: newPointTime,
 			}
+		}
+	} else {
+		if dist < 10 {
+			if idle := newPointTime.Time.Sub(state.ActiveSegment.LastMovement.Time); idle >= sp.GracePeriod {
+				logger.Debug().Msgf("Last significant movement was %s ago, ending segment.", idle)
+				event := SegmentEvent{
+					Start:    state.ActiveSegment.Start.Time,
+					End:      state.ActiveSegment.LastMovement.Time,
+					DeviceID: userDeviceID,
+				}
 
-			ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
-			ctx.Delete()
-			return
+				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
+
+				state.ActiveSegment = nil
+			} else {
+				logger.Debug().Msgf("Only moved %fm. Last significant movement was %s ago.", dist, idle)
+			}
+		} else {
+			logger.Debug().Msgf("Moved %fm. Continuing segment.", dist)
+			state.ActiveSegment.LastMovement = newPointTime
 		}
 	}
 
-	state.Latest.Latitude = newDeviceStatus.Data.Latitude
-	state.Latest.Longitude = newDeviceStatus.Data.Longitude
-	state.Latest.Time = newDeviceStatus.Data.Timestamp
+	state.Latest = newPointTime
 	ctx.SetValue(state)
 }
