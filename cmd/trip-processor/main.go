@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DIMO-Network/trips-api/internal/config"
+	"github.com/DIMO-Network/trips-api/services/consumer"
 	"github.com/DIMO-Network/trips-api/services/segmenter"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
@@ -64,6 +65,13 @@ func main() {
 			logger.Info().Msg("Processor shut down cleanly.")
 		}
 	}()
+
+	consumer, err := consumer.New(&settings, &logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to create consumer.")
+	}
+
+	consumer.Start(ctx)
 
 	wait := make(chan os.Signal, 1)
 	signal.Notify(wait, syscall.SIGINT, syscall.SIGTERM)

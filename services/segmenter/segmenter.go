@@ -112,7 +112,13 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 					DeviceID: userDeviceID,
 				}
 
-				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
+				ctx.Emit(
+					sp.CompletedSegmentTopic,
+					userDeviceID,
+					shared.CloudEvent[SegmentEvent]{
+						Data: event,
+					},
+				)
 
 				state.ActiveSegment = nil
 			} else {

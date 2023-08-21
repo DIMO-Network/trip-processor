@@ -7,4 +7,9 @@ type Settings struct {
 	ConsumerGroup     string `yaml:"CONSUMER_GROUP"`
 	DeviceStatusTopic string `yaml:"DEVICE_STATUS_TOPIC"`
 	TripEventTopic    string `yaml:"TRIP_EVENT_TOPIC"`
+
+	ElasticHost     string `yaml:"ELASTIC_HOST"`
+	ElasticUsername string `yaml:"ELASTIC_USERNAME"`
+	ElasticPassword string `yaml:"ELASTIC_PASSWORD"`
+	ElasticIndex    string `yaml:"ELASTIC_INDEX"`
 }
