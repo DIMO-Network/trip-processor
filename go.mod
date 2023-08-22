@@ -10,6 +10,7 @@ require (
 	github.com/lovoo/goka v1.1.9
 	github.com/prometheus/client_golang v1.12.1
 	github.com/rs/zerolog v1.28.0
+	github.com/tidwall/gjson v1.14.2
 )
 
 require (
@@ -26,7 +27,6 @@ require (
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/savsgio/dictpool v0.0.0-20221023140959-7bf2e61cea94 // indirect
 	github.com/savsgio/gotils v0.0.0-20230208104028-c358bd845dee // indirect
-	github.com/tidwall/gjson v1.14.2 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tinylib/msgp v1.1.8 // indirect
