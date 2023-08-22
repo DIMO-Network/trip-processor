@@ -1,13 +1,8 @@
 package consumer
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +13,7 @@ import (
 	"github.com/DIMO-Network/shared/kafka"
 	"github.com/DIMO-Network/trips-api/internal/config"
 	"github.com/DIMO-Network/trips-api/services/segmenter"
+	"github.com/DIMO-Network/trips-api/services/uploader"
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/rs/zerolog"
 	"github.com/tidwall/gjson"
@@ -71,17 +67,12 @@ func (c *CompletedSegmentConsumer) ingest(ctx context.Context, event *shared.Clo
 		return err
 	}
 
-	compressedData, err := c.compress(response, event.Data.DeviceID, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
+	encryptedData, err := uploader.PrepareData(response, event.Data.DeviceID, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
 
-	encryptedData, err := c.encrypt(compressedData)
-	if err != nil {
-		return err
-	}
-
-	err = c.upload(encryptedData)
+	err = uploader.Upload(encryptedData)
 	if err != nil {
 		return err
 	}
@@ -145,58 +136,6 @@ func (c *CompletedSegmentConsumer) fetchData(deviceID, start, end string) ([]byt
 	}
 
 	return response, nil
-}
-
-func (c *CompletedSegmentConsumer) compress(data []byte, deviceID, start, end string) ([]byte, error) {
-	b := new(bytes.Buffer)
-	zw := zip.NewWriter(b)
-
-	file, err := zw.Create(fmt.Sprintf("%s_%s.json", start, end))
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = file.Write(data)
-	if err != nil {
-		return nil, err
-	}
-
-	err = zw.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	return b.Bytes(), nil
-}
-
-func (c *CompletedSegmentConsumer) encrypt(data []byte) ([]byte, error) {
-	// generating random 32 byte key for AES-256
-	// this will change with PRO-1867 encryption keys created for minted
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return []byte{}, err
-	}
-
-	// key to string, for testing/ qc
-	key := hex.EncodeToString(bytes)
-	fmt.Println(key)
-
-	block, err := aes.NewCipher(bytes)
-	if err != nil {
-		return []byte{}, err
-	}
-
-	aesGCM, err := cipher.NewGCM(block)
-	nonce := make([]byte, aesGCM.NonceSize())
-
-	ciphertext := aesGCM.Seal(nonce, nonce, data, nil)
-
-	return ciphertext, nil
-}
-
-func (c *CompletedSegmentConsumer) upload(data []byte) error {
-	// TODO
-	return nil
 }
 
 func (c *CompletedSegmentConsumer) executeESQuery(query any) ([]byte, error) {

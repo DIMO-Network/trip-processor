@@ -1,0 +1,57 @@
+package uploader
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestPrepareData(t *testing.T) {
+	assert := assert.New(t)
+
+	data := `{"testData": ["this", "is", "a", "test"]}`
+	dataB, err := json.Marshal(data)
+	assert.NoError(err)
+	deviceID := "deviceIDTest"
+	start := "2023-08-16"
+	end := "2023-08-17"
+
+	compressedData, err := compress(dataB, deviceID, start, end)
+	assert.NoError(err)
+
+	// generating random 32 byte key for AES-256
+	// this will change with PRO-1867 encryption keys created for minted
+	key := make([]byte, 32)
+	_, err = rand.Read(key)
+	assert.NoError(err)
+
+	encryptedData, err := encrypt(compressedData, key)
+	assert.NoError(err)
+
+	// decrypt and check to make sure
+
+	//Create a new Cipher Block from the key
+	block, err := aes.NewCipher(key)
+	assert.NoError(err)
+
+	//Create a new GCM
+	aesGCM, err := cipher.NewGCM(block)
+	assert.NoError(err)
+
+	//Get the nonce size
+	nonceSize := aesGCM.NonceSize()
+
+	//Extract the nonce from the encrypted data
+	nonce, ciphertext := encryptedData[:nonceSize], encryptedData[nonceSize:]
+
+	//Decrypt the data
+	decryptedCompressedData, err := aesGCM.Open(nil, nonce, ciphertext, nil)
+	assert.NoError(err)
+
+	assert.Equal(decryptedCompressedData, compressedData)
+
+}
