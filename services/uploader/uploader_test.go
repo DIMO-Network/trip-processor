@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -28,6 +29,9 @@ func TestPrepareData(t *testing.T) {
 	key := make([]byte, 32)
 	_, err = rand.Read(key)
 	assert.NoError(err)
+
+	keyString := hex.EncodeToString(key)
+	t.Logf("Key: %s", keyString)
 
 	encryptedData, err := encrypt(compressedData, key)
 	assert.NoError(err)

@@ -53,10 +53,5 @@ func (c *CompletedSegmentConsumer) ingest(ctx context.Context, event *shared.Clo
 		return err
 	}
 
-	err = uploader.Upload(encryptedData)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return uploader.Upload(encryptedData)
 }
