@@ -8,8 +8,10 @@ type Settings struct {
 	DeviceStatusTopic string `yaml:"DEVICE_STATUS_TOPIC"`
 	TripEventTopic    string `yaml:"TRIP_EVENT_TOPIC"`
 
-	ElasticHost     string `yaml:"ELASTIC_HOST"`
-	ElasticUsername string `yaml:"ELASTIC_USERNAME"`
-	ElasticPassword string `yaml:"ELASTIC_PASSWORD"`
-	ElasticIndex    string `yaml:"ELASTIC_INDEX"`
+	ElasticHost              string `yaml:"ELASTIC_HOST"`
+	ElasticUsername          string `yaml:"ELASTIC_USERNAME"`
+	ElasticPassword          string `yaml:"ELASTIC_PASSWORD"`
+	ElasticIndex             string `yaml:"ELASTIC_INDEX"`
+	EthereumSignerPrivateKey string `yaml:"ETHEREUM_SIGNER_PRIVATE_KEY"`
+	BundlrNetwork            string `yaml:"BUNDLR_NETWORK"`
 }

@@ -7,10 +7,37 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
+
+	"github.com/DIMO-Network/trips-api/internal/config"
+	"github.com/warp-contracts/syncer/src/utils/arweave"
+	"github.com/warp-contracts/syncer/src/utils/bundlr"
 )
 
-func PrepareData(data []byte, start, end string) ([]byte, error) {
-	compressedData, err := compress(data, start, end)
+type Uploader struct {
+	Signer      *bundlr.EthereumSigner
+	url         string
+	contentType string
+}
+
+func New(settings *config.Settings) (*Uploader, error) {
+	signer, err := bundlr.NewEthereumSigner("0x" + settings.EthereumSignerPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Uploader{
+		Signer:      signer,
+		url:         settings.BundlrNetwork,
+		contentType: "application/octet-stream",
+	}, nil
+}
+
+func (u *Uploader) PrepareData(data []byte, start, end string) ([]byte, error) {
+	compressedData, err := u.compress(data, start, end)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -22,15 +49,52 @@ func PrepareData(data []byte, start, end string) ([]byte, error) {
 		return []byte{}, err
 	}
 
-	return encrypt(compressedData, bytes)
+	return u.encrypt(compressedData, bytes)
 }
 
-func Upload(_ []byte) error {
-	// TODO
+func (u *Uploader) Upload(data []byte) error {
+	dataItem := bundlr.BundleItem{
+		Data: arweave.Base64String(data),
+		// in the future-- allow tags to be passed in
+		// ie, someone could name their trip
+		Tags: bundlr.Tags{
+			bundlr.Tag{Name: "Content-Type", Value: "text"},
+			bundlr.Tag{Name: "Trip-Type", Value: "segment"},
+		},
+	}
+
+	err := dataItem.Sign(u.Signer)
+	if err != nil {
+		return err
+	}
+
+	reader, err := dataItem.Reader()
+	if err != nil {
+		return err
+	}
+
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+
+	responseBody := bytes.NewBuffer(body)
+	resp, err := http.Post(u.url, u.contentType, responseBody)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	sb := string(body)
+	log.Printf(sb)
 	return nil
 }
 
-func compress(data []byte, start, end string) ([]byte, error) {
+func (u *Uploader) compress(data []byte, start, end string) ([]byte, error) {
 	b := new(bytes.Buffer)
 	zw := zip.NewWriter(b)
 
@@ -52,7 +116,7 @@ func compress(data []byte, start, end string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func encrypt(data, key []byte) ([]byte, error) {
+func (u *Uploader) encrypt(data, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return []byte{}, err

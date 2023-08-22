@@ -4,3 +4,5 @@ KAFKA_BROKERS: localhost:9092
 CONSUMER_GROUP: trip-processor
 DEVICE_STATUS_TOPIC: topic.device.status
 TRIP_EVENT_TOPIC: topic.device.trip.event
+ETHEREUM_SIGNER_PRIVATE_KEY:
+BUNDLR_NETWORK: https://devnet.bundlr.network/tx/matic

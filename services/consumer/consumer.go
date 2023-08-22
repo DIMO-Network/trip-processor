@@ -18,27 +18,23 @@ type CompletedSegmentConsumer struct {
 	config kafka.Config
 	logger *zerolog.Logger
 	es     *es.Client
+	*uploader.Uploader
 }
 
-func New(es *es.Client, settings *config.Settings, logger *zerolog.Logger) (*CompletedSegmentConsumer, error) {
+func New(es *es.Client, uploader *uploader.Uploader, settings *config.Settings, logger *zerolog.Logger) (*CompletedSegmentConsumer, error) {
 	kc := kafka.Config{
 		Brokers: strings.Split(settings.KafkaBrokers, ","),
 		Topic:   settings.TripEventTopic,
 		Group:   "segmenter",
 	}
 
-	return &CompletedSegmentConsumer{
-		config: kc,
-		logger: logger,
-		es:     es,
-	}, nil
+	return &CompletedSegmentConsumer{kc, logger, es, uploader}, nil
 }
 
 func (c *CompletedSegmentConsumer) Start(ctx context.Context) {
 	if err := kafka.Consume(ctx, c.config, c.ingest, c.logger); err != nil {
 		c.logger.Fatal().Err(err).Msg("Couldn't start segment consumer.")
 	}
-
 	c.logger.Info().Msg("segment consumer started.")
 }
 
@@ -48,10 +44,9 @@ func (c *CompletedSegmentConsumer) ingest(_ context.Context, event *shared.Cloud
 		return err
 	}
 
-	encryptedData, err := uploader.PrepareData(response, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
+	encryptedData, err := c.PrepareData(response, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
-
-	return uploader.Upload(encryptedData)
+	return c.Upload(encryptedData)
 }

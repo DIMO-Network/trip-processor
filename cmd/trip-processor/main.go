@@ -12,6 +12,7 @@ import (
 	"github.com/DIMO-Network/trips-api/services/consumer"
 	es "github.com/DIMO-Network/trips-api/services/es_client"
 	"github.com/DIMO-Network/trips-api/services/segmenter"
+	"github.com/DIMO-Network/trips-api/services/uploader"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/lovoo/goka"
@@ -70,7 +71,12 @@ func main() {
 		logger.Fatal().Err(err).Msg("Failed to establish connection to elasticsearch.")
 	}
 
-	consumer, err := consumer.New(esClient, &settings, &logger)
+	uploader, err := uploader.New(&settings)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to start Bunldr uploader")
+	}
+
+	consumer, err := consumer.New(esClient, uploader, &settings, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to create consumer.")
 	}
