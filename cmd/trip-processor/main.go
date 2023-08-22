@@ -10,6 +10,7 @@ import (
 
 	"github.com/DIMO-Network/trips-api/internal/config"
 	"github.com/DIMO-Network/trips-api/services/consumer"
+	es "github.com/DIMO-Network/trips-api/services/es_client"
 	"github.com/DIMO-Network/trips-api/services/segmenter"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
@@ -42,8 +43,6 @@ func main() {
 
 	brokers := strings.Split(settings.KafkaBrokers, ",")
 
-	// Define a new processor group. The group defines all inputs, outputs, and
-	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(
 		goka.Group(settings.ConsumerGroup),
 		goka.Input(goka.Stream(settings.DeviceStatusTopic), deviceStatusCodec, segmenter.Process),
@@ -66,7 +65,12 @@ func main() {
 		}
 	}()
 
-	consumer, err := consumer.New(&settings, &logger)
+	esClient, err := es.New(&settings)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to establish connection to elasticsearch.")
+	}
+
+	consumer, err := consumer.New(esClient, &settings, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to create consumer.")
 	}
