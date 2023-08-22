@@ -9,8 +9,8 @@ import (
 	"fmt"
 )
 
-func PrepareData(data []byte, deviceID, start, end string) ([]byte, error) {
-	compressedData, err := compress(data, deviceID, start, end)
+func PrepareData(data []byte, start, end string) ([]byte, error) {
+	compressedData, err := compress(data, start, end)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -25,12 +25,12 @@ func PrepareData(data []byte, deviceID, start, end string) ([]byte, error) {
 	return encrypt(compressedData, bytes)
 }
 
-func Upload(data []byte) error {
+func Upload(_ []byte) error {
 	// TODO
 	return nil
 }
 
-func compress(data []byte, deviceID, start, end string) ([]byte, error) {
+func compress(data []byte, start, end string) ([]byte, error) {
 	b := new(bytes.Buffer)
 	zw := zip.NewWriter(b)
 
@@ -59,6 +59,9 @@ func encrypt(data, key []byte) ([]byte, error) {
 	}
 
 	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return []byte{}, err
+	}
 	nonce := make([]byte, aesGCM.NonceSize())
 
 	return aesGCM.Seal(nonce, nonce, data, nil), nil

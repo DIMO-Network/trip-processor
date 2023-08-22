@@ -42,13 +42,13 @@ func (c *CompletedSegmentConsumer) Start(ctx context.Context) {
 	c.logger.Info().Msg("segment consumer started.")
 }
 
-func (c *CompletedSegmentConsumer) ingest(ctx context.Context, event *shared.CloudEvent[segmenter.SegmentEvent]) error {
+func (c *CompletedSegmentConsumer) ingest(_ context.Context, event *shared.CloudEvent[segmenter.SegmentEvent]) error {
 	response, err := c.es.FetchData(event.Data.DeviceID, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
 
-	encryptedData, err := uploader.PrepareData(response, event.Data.DeviceID, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
+	encryptedData, err := uploader.PrepareData(response, event.Data.Start.Format(time.RFC3339), event.Data.End.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}

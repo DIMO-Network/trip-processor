@@ -17,11 +17,10 @@ func TestPrepareData(t *testing.T) {
 	data := `{"testData": ["this", "is", "a", "test"]}`
 	dataB, err := json.Marshal(data)
 	assert.NoError(err)
-	deviceID := "deviceIDTest"
 	start := "2023-08-16"
 	end := "2023-08-17"
 
-	compressedData, err := compress(dataB, deviceID, start, end)
+	compressedData, err := compress(dataB, start, end)
 	assert.NoError(err)
 
 	// generating random 32 byte key for AES-256
