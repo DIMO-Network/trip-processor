@@ -19,10 +19,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const tripGracePeriod = 15 * time.Minute
+const tripGracePeriod = 5 * time.Minute
 
 var deviceStatusCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.PartialStatusData]]{}
-var segmentStateCodec = &shared.JSONCodec[segmenter.SegmentState]{}
+var segmentStateCodec = &shared.JSONCodec[segmenter.State]{}
 var segmentEventCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.SegmentEvent]]{}
 
 func main() {
@@ -70,7 +70,6 @@ func main() {
 	<-wait   // wait for SIGINT/SIGTERM
 	cancel() // gracefully stop processor
 	<-done
-
 }
 
 func serveMonitoring(port string, logger *zerolog.Logger) *fiber.App {

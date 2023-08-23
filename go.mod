@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/DIMO-Network/shared v0.10.2
-	github.com/burdiyan/kafkautil v0.0.0-20190131162249-eaf83ed22d5b
 	github.com/gofiber/adaptor/v2 v2.1.27
 	github.com/gofiber/fiber/v2 v2.46.0
 	github.com/lovoo/goka v1.1.9
@@ -34,9 +33,7 @@ require (
 
 require (
 	github.com/IBM/sarama v1.40.1 // indirect
-	github.com/Shopify/sarama v1.38.1 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
-	github.com/avast/retry-go v3.0.0+incompatible // indirect
 	github.com/avast/retry-go/v4 v4.0.3 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.16.5 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.12 // indirect
