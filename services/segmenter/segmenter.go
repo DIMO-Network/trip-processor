@@ -106,10 +106,12 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 		if dist < 10 {
 			if idle := newPointTime.Time.Sub(state.ActiveSegment.LastMovement.Time); idle >= sp.GracePeriod {
 				logger.Debug().Msgf("Last significant movement was %s ago, ending segment.", idle)
-				event := SegmentEvent{
-					Start:    state.ActiveSegment.Start,
-					End:      state.ActiveSegment.LastMovement,
-					DeviceID: userDeviceID,
+				event := shared.CloudEvent[SegmentEvent]{
+					Data: SegmentEvent{
+						Start:    state.ActiveSegment.Start,
+						End:      state.ActiveSegment.LastMovement,
+						DeviceID: userDeviceID,
+					},
 				}
 
 				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
