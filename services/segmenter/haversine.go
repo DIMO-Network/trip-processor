@@ -5,14 +5,8 @@ import (
 )
 
 const (
-	earthRaidusM = 6_371_000 // radius of the earth in kilometers.
+	earthRaidusMeters = 6_371_000
 )
-
-// Coord represents a geographic coordinate.
-type Coord struct {
-	Lat float64
-	Lon float64
-}
 
 // degreesToRadians converts from degrees to radians.
 func degreesToRadians(d float64) float64 {
@@ -34,5 +28,5 @@ func Distance(p1, p2 Point) float64 {
 
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
-	return earthRaidusM * c
+	return earthRaidusMeters * c
 }
