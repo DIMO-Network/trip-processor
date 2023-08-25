@@ -4,8 +4,6 @@ AutoPis often transmit engine start (`vehicle/engine/running`) and stop (`vehicl
 
 From Teslas, we get a rich data point roughly every minute that the car is online. The plan is to do some simple [session windowing](https://developer.confluent.io/tutorials/create-session-windows/confluent.html) on data points with non-zero speed.
 
-![](./flowchart.png "Flowchart of Segment Processing Logic")
-
 ```mermaid
 flowchart TD
   new --> C1{New\nVehicle?}
