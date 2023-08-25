@@ -19,7 +19,7 @@ flowchart TD
   S4 -->|Yes| S5>"End segment"]
   S3 -->|Yes| S6["lastMove = new"]
   S3 -->|No| S4{"lastMove ≥ 5min"}
-
+  S4 -->|No| FU
 
 
   S6 --> FU
