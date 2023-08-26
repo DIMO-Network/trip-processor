@@ -1,8 +1,6 @@
 # trip-processor
 
-AutoPis often transmit engine start (`vehicle/engine/running`) and stop (`vehicle/engine/stopped`) events. I've heard these are unreliable.
-
-From Teslas, we get a rich data point roughly every minute that the car is online. The plan is to do some simple [session windowing](https://developer.confluent.io/tutorials/create-session-windows/confluent.html) on data points with non-zero speed.
+We're relying on location to detect motion because all high-frequency sources have it. AutoPi support for odometer, speed, or runtime appears spotty.
 
 ```mermaid
 flowchart TD
