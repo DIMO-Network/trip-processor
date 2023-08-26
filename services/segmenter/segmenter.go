@@ -65,7 +65,8 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 
 	logger := sp.logger.With().Str("userDeviceId", userDeviceID).Time("eventTime", newDeviceStatus.Data.Timestamp).Logger()
 
-	if newDeviceStatus.Source != "dimo/integration/27qftVRWQYpVDcO5DltO5Ojbjxk" ||
+	if newDeviceStatus.Source != "dimo/integration/27qftVRWQYpVDcO5DltO5Ojbjxk" &&
+		newDeviceStatus.Source != "dimo/integration/26A5Dk3vvvQutjSyF0Jka2DP5lg" ||
 		newDeviceStatus.Data.Latitude == nil ||
 		newDeviceStatus.Data.Longitude == nil {
 		return
