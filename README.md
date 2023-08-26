@@ -1,4 +1,4 @@
-# DIMO Trips API
+# trip-processor
 
 AutoPis often transmit engine start (`vehicle/engine/running`) and stop (`vehicle/engine/stopped`) events. I've heard these are unreliable.
 
