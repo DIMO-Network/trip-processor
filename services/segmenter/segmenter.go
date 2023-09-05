@@ -42,8 +42,8 @@ type PointTime struct {
 }
 
 type SegmentEvent struct {
-	Start    time.Time `json:"start"`
-	End      time.Time `json:"end"`
+	Start    PointTime `json:"start"`
+	End      PointTime `json:"end"`
 	DeviceID string    `json:"deviceID"`
 }
 
@@ -107,10 +107,12 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 		if dist < 10 {
 			if idle := newPointTime.Time.Sub(state.ActiveSegment.LastMovement.Time); idle >= sp.GracePeriod {
 				logger.Debug().Msgf("Last significant movement was %s ago, ending segment.", idle)
-				event := SegmentEvent{
-					Start:    state.ActiveSegment.Start.Time,
-					End:      state.ActiveSegment.LastMovement.Time,
-					DeviceID: userDeviceID,
+				event := shared.CloudEvent[SegmentEvent]{
+					Data: SegmentEvent{
+						Start:    state.ActiveSegment.Start,
+						End:      state.ActiveSegment.LastMovement,
+						DeviceID: userDeviceID,
+					},
 				}
 
 				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
