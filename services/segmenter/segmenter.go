@@ -6,6 +6,8 @@ import (
 	"github.com/DIMO-Network/shared"
 	"github.com/DIMO-Network/trips-api/internal/config"
 	"github.com/lovoo/goka"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 )
 
@@ -116,6 +118,7 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 				}
 
 				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
+				SegmentsEmittedTotal.Inc()
 
 				state.ActiveSegment = nil
 			} else {
@@ -130,3 +133,13 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	state.Latest = newPointTime
 	ctx.SetValue(state)
 }
+
+var (
+	SegmentsEmittedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "trip_processor",
+			Name:      "emitted_segments_total",
+			Help:      "The total number of completed trip segments.",
+		},
+	)
+)
