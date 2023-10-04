@@ -5,7 +5,8 @@ import (
 )
 
 const (
-	earthRaidusMeters = 6_371_000
+	// Average radius of the earth, in meters.
+	earthRadiusMeters = 6_371_000
 )
 
 // degreesToRadians converts from degrees to radians.
@@ -13,7 +14,7 @@ func degreesToRadians(d float64) float64 {
 	return d * math.Pi / 180
 }
 
-// Distance calculates the shortest path between two coordinates on the surface
+// Distance approximates the distance between two coordinates on the surface
 // of the Earth. The returned distance is in meters.
 func Distance(p1, p2 Point) float64 {
 	lat1 := degreesToRadians(p1.Latitude)
@@ -28,5 +29,5 @@ func Distance(p1, p2 Point) float64 {
 
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
-	return earthRaidusMeters * c
+	return earthRadiusMeters * c
 }

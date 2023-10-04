@@ -61,6 +61,10 @@ func (sp *SegmentProcessor) MovementDetected(p1 Point, p2 Point) bool {
 	return Distance(p1, p2) > 10 // estimate of point-to-point drift (10meters,~33feet)
 }
 
+// speedThreshold is the speed, in m/s, that we consider to be showing movement and
+// not merely GPS noise. The number 5 here is roughly 11 mi/h.
+const speedThreshold = 5
+
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
 	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
@@ -95,18 +99,21 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 
 	state = val.(*State)
 
-	dist := Distance(state.Latest.Point, newPoint)
+	dPos := Distance(state.Latest.Point, newPoint) // In meters.
+	dTime := newPointTime.Time.Sub(state.Latest.Time)
+
+	estSpeed := dPos / dTime.Seconds() // In m/s.
 
 	if state.ActiveSegment == nil {
-		if dist >= 10 {
-			logger.Debug().Msgf("Moved %fm, starting a segment.", dist)
+		if estSpeed >= speedThreshold {
+			logger.Debug().Msgf("Moving at %f m/s, starting a segment.", estSpeed)
 			state.ActiveSegment = &Segment{
 				Start:        newPointTime,
 				LastMovement: newPointTime,
 			}
 		}
 	} else {
-		if dist < 10 {
+		if estSpeed < 10 {
 			if idle := newPointTime.Time.Sub(state.ActiveSegment.LastMovement.Time); idle >= sp.GracePeriod {
 				logger.Debug().Msgf("Last significant movement was %s ago, ending segment.", idle)
 				event := shared.CloudEvent[SegmentEvent]{
@@ -122,10 +129,10 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 
 				state.ActiveSegment = nil
 			} else {
-				logger.Debug().Msgf("Only moved %fm. Last significant movement was %s ago.", dist, idle)
+				logger.Debug().Msgf("Only moved %fm. Last significant movement was %s ago.", dPos, idle)
 			}
 		} else {
-			logger.Debug().Msgf("Moved %fm. Continuing segment.", dist)
+			logger.Debug().Msgf("Moved %fm. Continuing segment.", dPos)
 			state.ActiveSegment.LastMovement = newPointTime
 		}
 	}
