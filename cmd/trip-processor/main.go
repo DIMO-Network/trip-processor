@@ -21,7 +21,7 @@ import (
 
 const tripGracePeriod = 5 * time.Minute
 
-var deviceStatusCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.PartialStatusData]]{}
+var deviceStatusCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.Point]]{}
 var segmentStateCodec = &shared.JSONCodec[segmenter.State]{}
 var segmentEventCodec = &shared.JSONCodec[shared.CloudEvent[segmenter.SegmentEvent]]{}
 
