@@ -69,7 +69,7 @@ func (sp *SegmentProcessor) SpeedCalc(p1 Point, p2 Point) float64 {
 // speedThreshold is the speed, in m/s, that we consider to be showing movement and
 // not merely GPS noise. The number 5 here is roughly 11 mi/h.
 const speedThreshold = 5
-const convertToMetersPerSec float64 = 5 / 18
+const convertToMetersPerSec = float64(5) / float64(18)
 
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
