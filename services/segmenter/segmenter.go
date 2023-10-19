@@ -148,7 +148,6 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 
 	state.Latest = newPointTime
 	ctx.SetValue(state)
-	return
 }
 
 var (

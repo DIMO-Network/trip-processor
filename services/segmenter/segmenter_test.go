@@ -10,6 +10,7 @@ import (
 	"github.com/lovoo/goka"
 	"github.com/lovoo/goka/tester"
 	"github.com/rs/zerolog"
+	"github.com/smallstep/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +41,10 @@ func TestSegmentProcessor_Process_StoreFirstObs_LatLon(t *testing.T) {
 		goka.WithTester(gkt),
 	)
 
-	go proc.Run(context.Background())
+	go func() {
+		err := proc.Run(context.Background())
+		assert.NoError(t, err)
+	}()
 
 	msg1 := shared.CloudEvent[PartialStatusData]{
 		ID: key,
@@ -91,7 +95,10 @@ func TestSegmentProcessor_Process_StoreActiveSeg_LatLon(t *testing.T) {
 		goka.WithTester(gkt),
 	)
 
-	go proc.Run(context.Background())
+	go func() {
+		err := proc.Run(context.Background())
+		assert.NoError(t, err)
+	}()
 
 	msg1 := shared.CloudEvent[PartialStatusData]{
 		ID: key,
@@ -162,7 +169,11 @@ func TestSegmentProcessor_Process_StoreFirstObs_Speed(t *testing.T) {
 		goka.WithTester(gkt),
 	)
 
-	go proc.Run(context.Background())
+	go func() {
+		err := proc.Run(context.Background())
+		assert.NoError(t, err)
+	}()
+
 	speed := 40.0
 	msg1 := shared.CloudEvent[PartialStatusData]{
 		ID: key,
@@ -215,7 +226,11 @@ func TestSegmentProcessor_Process_StoreActiveSeg_Speed(t *testing.T) {
 		goka.WithTester(gkt),
 	)
 
-	go proc.Run(context.Background())
+	go func() {
+		err := proc.Run(context.Background())
+		assert.NoError(t, err)
+	}()
+
 	speed := 40.0
 	msg1 := shared.CloudEvent[PartialStatusData]{
 		ID: key,
