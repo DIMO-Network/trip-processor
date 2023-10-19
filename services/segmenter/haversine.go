@@ -17,10 +17,10 @@ func degreesToRadians(d float64) float64 {
 // Distance approximates the distance between two coordinates on the surface
 // of the Earth. The returned distance is in meters.
 func Distance(p1, p2 Point) float64 {
-	lat1 := degreesToRadians(*p1.Latitude)
-	lon1 := degreesToRadians(*p1.Longitude)
-	lat2 := degreesToRadians(*p2.Latitude)
-	lon2 := degreesToRadians(*p2.Longitude)
+	lat1 := degreesToRadians(p1.Latitude)
+	lon1 := degreesToRadians(p1.Longitude)
+	lat2 := degreesToRadians(p2.Latitude)
+	lon2 := degreesToRadians(p2.Longitude)
 
 	diffLat := lat2 - lat1
 	diffLon := lon2 - lon1

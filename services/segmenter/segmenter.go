@@ -17,9 +17,9 @@ type SegmentProcessor struct {
 	CompletedSegmentTopic goka.Stream
 }
 
-type Point struct {
-	Latitude  *float64  `json:"latitude,omitempty"`
-	Longitude *float64  `json:"longitude,omitempty"`
+type PartialStatusData struct {
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
 	Speed     *float64  `json:"speed,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -32,6 +32,12 @@ type State struct {
 type Segment struct {
 	Start        PointTime `json:"start"`
 	LastMovement PointTime `json:"lastMovement"`
+}
+
+type Point struct {
+	Latitude  float64  `json:"latitude"`
+	Longitude float64  `json:"longitude"`
+	Speed     *float64 `json:"speed,omitempty"`
 }
 
 type PointTime struct {
@@ -53,17 +59,14 @@ func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProc
 	}
 }
 
-func (sp *SegmentProcessor) SpeedCalc(p1 Point, p2 Point) float64 {
-	if p2.Speed != nil {
-		return *p2.Speed * convertToMetersPerSec
+func (sp *SegmentProcessor) SpeedCalc(p1 PointTime, p2 PointTime) float64 {
+	if p2.Point.Speed != nil {
+		return *p2.Point.Speed * convertToMetersPerSec
 	}
 
-	if p1.Latitude != nil && p1.Longitude != nil && p2.Latitude != nil && p2.Longitude != nil {
-		dist := Distance(p1, p2)
-		dur := p2.Timestamp.Sub(p1.Timestamp)
-		return dist / dur.Seconds()
-	}
-	return 0
+	dist := Distance(p1.Point, p2.Point)
+	dur := p2.Time.Sub(p1.Time)
+	return dist / dur.Seconds()
 }
 
 // speedThreshold is the speed, in m/s, that we consider to be showing movement and
@@ -73,7 +76,7 @@ const convertToMetersPerSec = float64(5) / float64(18)
 
 func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	userDeviceID := ctx.Key()
-	newDeviceStatus := msg.(*shared.CloudEvent[Point])
+	newDeviceStatus := msg.(*shared.CloudEvent[PartialStatusData])
 
 	logger := sp.logger.With().Str("userDeviceId", userDeviceID).Time("eventTime", newDeviceStatus.Data.Timestamp).Logger()
 
@@ -86,11 +89,19 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 		return
 	}
 
-	newPointTime := PointTime{
-		Point: newDeviceStatus.Data,
-		Time:  newDeviceStatus.Data.Timestamp,
+	newPoint := Point{
+		Latitude:  *newDeviceStatus.Data.Latitude,
+		Longitude: *newDeviceStatus.Data.Longitude,
 	}
 
+	if newDeviceStatus.Data.Speed != nil {
+		newPoint.Speed = newDeviceStatus.Data.Speed
+	}
+
+	newPointTime := PointTime{
+		Point: newPoint,
+		Time:  newDeviceStatus.Data.Timestamp,
+	}
 	var state *State
 
 	val := ctx.Value()
@@ -101,12 +112,12 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 	}
 
 	state = val.(*State)
-	estSpeed := sp.SpeedCalc(state.Latest.Point, newPointTime.Point)
+	estSpeed := sp.SpeedCalc(state.Latest, newPointTime)
 	if state.ActiveSegment == nil {
 		if estSpeed >= speedThreshold {
 			logger.Debug().Msgf("Moving at %f m/s, starting a segment.", estSpeed)
 			state.ActiveSegment = &Segment{
-				Start:        newPointTime,
+				Start:        state.Latest,
 				LastMovement: newPointTime,
 			}
 		}
@@ -137,6 +148,7 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 
 	state.Latest = newPointTime
 	ctx.SetValue(state)
+	return
 }
 
 var (
