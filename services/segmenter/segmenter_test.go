@@ -191,7 +191,6 @@ func TestSegmentProcessor_Process_StoreFirstObs_Speed(t *testing.T) {
 		Point: Point{
 			Latitude:  *msg1.Data.Latitude,
 			Longitude: *msg1.Data.Longitude,
-			Speed:     &speed,
 		},
 		Time: msg1.Data.Timestamp,
 	}
@@ -261,7 +260,6 @@ func TestSegmentProcessor_Process_StoreActiveSeg_Speed(t *testing.T) {
 			Point: Point{
 				Latitude:  *msg1.Data.Latitude,
 				Longitude: *msg1.Data.Longitude,
-				Speed:     msg1.Data.Speed,
 			},
 			Time: msg1.Data.Timestamp,
 		},
@@ -269,7 +267,6 @@ func TestSegmentProcessor_Process_StoreActiveSeg_Speed(t *testing.T) {
 			Point: Point{
 				Latitude:  *msg2.Data.Latitude,
 				Longitude: *msg2.Data.Longitude,
-				Speed:     msg2.Data.Speed,
 			},
 			Time: msg2.Data.Timestamp,
 		},
