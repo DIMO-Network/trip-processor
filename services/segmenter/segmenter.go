@@ -58,7 +58,7 @@ func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProc
 	}
 }
 
-// SpeedCalc returns the average speed traveling from PointTime p1 to
+// SpeedCalc returns an estimate of the average speed traveling from PointTime p1 to
 // PointTime p2. The return value is in km/h.
 func SpeedCalc(p1 PointTime, p2 PointTime) float64 {
 	dist := Distance(p1.Point, p2.Point)
