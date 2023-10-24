@@ -143,7 +143,8 @@ func TestSegmentProcessor_Process_StoreActiveSeg_LatLon(t *testing.T) {
 
 	v := gkt.TableValue("group-table", key)
 	value := v.(*State)
-	require.Equal(t, tblResult.ActiveSegment, value.ActiveSegment)
+	require.Equal(t, tblResult.ActiveSegment.Start, value.ActiveSegment.Start)
+	require.Equal(t, tblResult.ActiveSegment.LastMovement, value.ActiveSegment.LastMovement)
 }
 
 func TestSegmentProcessor_Process_StoreFirstObs_Speed(t *testing.T) {
@@ -277,7 +278,8 @@ func TestSegmentProcessor_Process_StoreActiveSeg_Speed(t *testing.T) {
 
 	v := gkt.TableValue("group-table", key)
 	value := v.(*State)
-	require.Equal(t, tblResult.ActiveSegment, value.ActiveSegment)
+	require.Equal(t, tblResult.ActiveSegment.LastMovement, value.ActiveSegment.LastMovement)
+	require.Equal(t, tblResult.ActiveSegment.Start, value.ActiveSegment.Start)
 }
 
 func float64Ptr(f float64) *float64 {

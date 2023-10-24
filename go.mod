@@ -9,6 +9,7 @@ require (
 	github.com/lovoo/goka v1.1.9
 	github.com/prometheus/client_golang v1.12.1
 	github.com/rs/zerolog v1.28.0
+	github.com/segmentio/ksuid v1.0.4
 	github.com/smallstep/assert v0.0.0-20200723003110-82e2b9b3b262
 	github.com/stretchr/testify v1.8.4
 )
