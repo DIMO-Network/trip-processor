@@ -9,12 +9,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
+	"github.com/segmentio/ksuid"
 )
 
 type SegmentProcessor struct {
-	logger                *zerolog.Logger
-	GracePeriod           time.Duration
-	CompletedSegmentTopic goka.Stream
+	logger            *zerolog.Logger
+	GracePeriod       time.Duration
+	SegmentEventTopic goka.Stream
 }
 
 type PartialStatusData struct {
@@ -32,6 +33,7 @@ type State struct {
 type Segment struct {
 	Start        PointTime `json:"start"`
 	LastMovement PointTime `json:"lastMovement"`
+	ID           string    `json:"id"`
 }
 
 type Point struct {
@@ -45,16 +47,18 @@ type PointTime struct {
 }
 
 type SegmentEvent struct {
-	Start    PointTime `json:"start"`
-	End      PointTime `json:"end"`
-	DeviceID string    `json:"deviceID"`
+	Start     PointTime `json:"start"`
+	End       PointTime `json:"end"`
+	DeviceID  string    `json:"deviceID"`
+	Completed bool      `json:"completed"`
+	ID        string    `json:"id"`
 }
 
 func New(log *zerolog.Logger, gp time.Duration, s *config.Settings) *SegmentProcessor {
 	return &SegmentProcessor{
-		logger:                log,
-		GracePeriod:           gp,
-		CompletedSegmentTopic: goka.Stream(s.TripEventTopic),
+		logger:            log,
+		GracePeriod:       gp,
+		SegmentEventTopic: goka.Stream(s.TripEventTopic),
 	}
 }
 
@@ -118,7 +122,18 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 			state.ActiveSegment = &Segment{
 				Start:        state.Latest,
 				LastMovement: newPointTime,
+				ID:           ksuid.New().String(),
 			}
+
+			event := shared.CloudEvent[SegmentEvent]{
+				Data: SegmentEvent{
+					Start:    state.ActiveSegment.Start,
+					DeviceID: userDeviceID,
+					ID:       state.ActiveSegment.ID,
+				},
+			}
+			ctx.Emit(sp.SegmentEventTopic, userDeviceID, event)
+			OngoingSegmentsTotal.Inc()
 		}
 	} else {
 		if speed < speedThreshold {
@@ -126,14 +141,17 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 				logger.Debug().Msgf("Last significant movement was %s ago, ending segment.", idle)
 				event := shared.CloudEvent[SegmentEvent]{
 					Data: SegmentEvent{
-						Start:    state.ActiveSegment.Start,
-						End:      state.ActiveSegment.LastMovement,
-						DeviceID: userDeviceID,
+						Start:     state.ActiveSegment.Start,
+						End:       state.ActiveSegment.LastMovement,
+						DeviceID:  userDeviceID,
+						Completed: true,
+						ID:        state.ActiveSegment.ID,
 					},
 				}
 
-				ctx.Emit(sp.CompletedSegmentTopic, userDeviceID, event)
-				SegmentsEmittedTotal.Inc()
+				ctx.Emit(sp.SegmentEventTopic, userDeviceID, event)
+				CompletedSegmentsTotal.Inc()
+				OngoingSegmentsTotal.Dec()
 
 				state.ActiveSegment = nil
 			} else {
@@ -150,11 +168,19 @@ func (sp *SegmentProcessor) Process(ctx goka.Context, msg any) {
 }
 
 var (
-	SegmentsEmittedTotal = promauto.NewCounter(
+	CompletedSegmentsTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "trip_processor",
-			Name:      "emitted_segments_total",
+			Name:      "completed_segments_total",
 			Help:      "The total number of completed trip segments.",
+		},
+	)
+
+	OngoingSegmentsTotal = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "trip_processor",
+			Name:      "ongoing_segments_total",
+			Help:      "The total number of ongoing trip segments.",
 		},
 	)
 )
