@@ -49,7 +49,7 @@ type PointTime struct {
 type SegmentEvent struct {
 	Start     PointTime `json:"start"`
 	End       PointTime `json:"end"`
-	DeviceID  string    `json:"deviceID"`
+	DeviceID  string    `json:"deviceId"`
 	Completed bool      `json:"completed"`
 	ID        string    `json:"id"`
 }
